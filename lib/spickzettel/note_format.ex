@@ -9,6 +9,9 @@ defmodule Spickzettel.NoteFormat do
   @typs ~w(user feedback project reference)
   @reasoned ~w(feedback project)
 
+  @spec typs() :: [String.t()]
+  def typs, do: @typs
+
   @spec problems(String.t()) :: [String.t()]
   def problems(text) do
     if Note.header?(text),

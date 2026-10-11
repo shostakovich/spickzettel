@@ -181,4 +181,123 @@ defmodule Spickzettel.EndpointTest do
                "**Belege:** 3 sessions, last #{today()}"
              )
   end
+
+  describe "create" do
+    test "in a project hub adds the header line and links the note under its typ's section",
+         %{base: base} do
+      assert memory(base, "create", %{
+               path: "/memories/spickzettel/deploy-runbooks",
+               title: "Deploy runbooks",
+               typ: "feedback",
+               icon: "📒",
+               file_text:
+                 "**Kurz:** Runbooks live outside the repository.\n\n" <>
+                   "**Why:** Public repository.\n\n**How to apply:** Link them."
+             }) == {:ok, "ok · /memories/spickzettel/deploy-runbooks · #{today()}"}
+
+      note = FakeOutline.titled("Deploy runbooks")
+      assert note["parentDocumentId"] == "hub-project"
+
+      assert note["text"] ==
+               "`name: deploy-runbooks` · `typ: feedback` · `stand: #{today()}`\n\n" <>
+                 "**Kurz:** Runbooks live outside the repository.\n\n" <>
+                 "**Why:** Public repository.\n\n**How to apply:** Link them.\n"
+
+      assert FakeOutline.text("hub-project") =~
+               "integration tests.\n* 📒 [Deploy runbooks](http://outline.test/doc/#{note["urlId"]})" <>
+                 " — Runbooks live outside the repository.\n"
+
+      assert {:ok, "# 📒 Deploy runbooks\n`name: deploy-runbooks`" <> _} =
+               memory(base, "view", %{path: "/memories/spickzettel/deploy-runbooks"})
+    end
+
+    test "creates the note and lists similar notes", %{base: base} do
+      assert memory(base, "create", %{
+               path: "/memories/spickzettel/mocks",
+               title: "Mocks in tests",
+               typ: "reference",
+               file_text: "**Kurz:** Mock collaborators with Mox in fast unit tests."
+             }) ==
+               {:ok,
+                "ok · /memories/spickzettel/mocks · #{today()}\n" <>
+                  ~s(Warning: added new section "References" to /memories/spickzettel.\n) <>
+                  "Similar notes: /memories/spickzettel/tests-london-style"}
+
+      assert FakeOutline.titled("Mocks in tests")
+      assert FakeOutline.text("hub-project") =~ "## References\n\n* [Mocks in tests]"
+    end
+
+    test "rejects a note in the cross-project hub without a section and lists the sections",
+         %{base: base} do
+      before = FakeOutline.text("hub-general")
+
+      assert memory(base, "create", %{
+               path: "/memories/General/kebab-slugs",
+               title: "Kebab slugs",
+               typ: "reference",
+               file_text: "**Kurz:** Slugs are kebab-case."
+             }) ==
+               {:error,
+                "Name the section of /memories/General for the link in `section`. " <>
+                  "Sections: Code, Projects. Nothing changed."}
+
+      refute FakeOutline.titled("Kebab slugs")
+      assert FakeOutline.text("hub-general") == before
+    end
+  end
+
+  test "rename across hubs moves the link from the old hub to the new one", %{base: base} do
+    assert memory(base, "rename", %{
+             old_path: "/memories/spickzettel/tests-london-style",
+             new_path: "/memories/other/london-tests"
+           }) ==
+             {:ok,
+              "ok · /memories/other/london-tests · #{today()}\n" <>
+                ~s(Warning: added new section "Working style" to /memories/other.)}
+
+    refute FakeOutline.text("hub-project") =~ "TST1"
+
+    assert FakeOutline.text("hub-other") ==
+             "Another project.\n\n## Working style\n\n" <>
+               "* 🧪 [Tests: London style](http://outline.test/doc/TST1) — " <>
+               "Many fast unit tests, few integration tests.\n"
+
+    assert {:ok, "# 🧪 Tests: London style\n`name: london-tests`" <> _} =
+             memory(base, "view", %{path: "/memories/other/london-tests"})
+  end
+
+  test "delete removes the note and its link", %{base: base} do
+    assert memory(base, "delete", %{path: "/memories/spickzettel/tests-london-style"}) ==
+             {:ok, "ok · deleted /memories/spickzettel/tests-london-style"}
+
+    refute FakeOutline.titled("Tests: London style")
+    refute FakeOutline.text("hub-project") =~ "TST1"
+  end
+
+  test "moves the oldest sections of a dream log grown above 15,000 characters into the archive",
+       %{base: base} do
+    new_run = "\n## 2026-10-11 · Dream\n\n" <> String.duplicate("n", 2_000) <> "\n"
+
+    assert {:ok, reply} =
+             memory(base, "insert", %{
+               path: "/memories/General/dream-log",
+               insert_line: 1,
+               insert_text: new_run
+             })
+
+    assert reply =~ ~r/^ok · \/memories\/General\/dream-log\n/
+
+    assert reply =~
+             ~r/\nMoved the oldest section of the dream log to \/memories\/General\/dream-log-archive.$/
+
+    dream_log = FakeOutline.text("note-dream-log")
+    archive = FakeOutline.text("note-dream-log-archive")
+
+    assert String.length(dream_log) < 15_000
+    assert dream_log =~ "## 2026-10-11 · Dream"
+    refute dream_log =~ "## 2026-10-08"
+
+    assert archive =~
+             ~r/^Older runs, newest first.\n\n## 2026-10-08 · Dream\n\nz+\n\n## 2026-10-01/
+  end
 end

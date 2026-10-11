@@ -25,7 +25,7 @@ defmodule Spickzettel.MemoryTest do
     assert definition.name == "memory"
 
     assert definition.inputSchema.properties.command.enum ==
-             ["view", "str_replace", "insert", "confirm"]
+             ["view", "create", "str_replace", "insert", "delete", "rename", "confirm"]
   end
 
   test "says that insert_line counts lines below the title, like view_range" do
@@ -33,6 +33,11 @@ defmodule Spickzettel.MemoryTest do
 
     assert definition.description =~ "`insert_line`, counted below the title like `view_range`"
     assert definition.inputSchema.properties.insert_line.description =~ "below the title"
+  end
+
+  test "says which notes need a section" do
+    assert Memory.definition().description =~
+             "`section`, which `user` notes, pitfalls and the cross-project hub require"
   end
 
   test "says that insert_text is Markdown with paragraphs separated by blank lines" do
@@ -70,6 +75,14 @@ defmodule Spickzettel.MemoryTest do
 
     assert view(%{"path" => "/memories/project/tests", "section" => "Other"}) ==
              {:error, ~s(No section "Other" in /memories/project/tests. Sections: Mocks.)}
+  end
+
+  test "treats null arguments as missing" do
+    stub(IndexMock, :lookup, fn "project", "tests" -> {:ok, @note} end)
+    stub(OutlineMock, :get_document, fn "note-1" -> {:ok, @note} end)
+
+    assert {:ok, "# 🧪 Tests\n" <> _} =
+             view(%{"path" => "/memories/project/tests", "section" => nil, "view_range" => nil})
   end
 
   test "shows a line range of a note" do
@@ -117,10 +130,11 @@ defmodule Spickzettel.MemoryTest do
 
   test "rejects invalid arguments" do
     assert Memory.call(%{}, @deps) ==
-             {:error, "Missing command. Commands: view, str_replace, insert, confirm."}
+             {:error,
+              "Missing command. Commands: view, create, str_replace, insert, delete, rename, confirm."}
 
-    assert Memory.call(%{"command" => "create"}, @deps) ==
-             {:error, ~s(Unknown command "create". Commands: view, str_replace, insert, confirm.)}
+    assert {:error, ~s(Unknown command "copy". Commands: view, create,) <> _} =
+             Memory.call(%{"command" => "copy"}, @deps)
 
     assert view(%{}) == {:error, "Missing path."}
     assert {:error, "Invalid path \"/notes\"." <> _} = view(%{"path" => "/notes"})
@@ -138,6 +152,31 @@ defmodule Spickzettel.MemoryTest do
 
     assert view(%{"path" => "/memories/p", "section" => "A"}) ==
              {:error, "section and view_range apply to notes only."}
+  end
+
+  test "rejects invalid create, rename and delete arguments" do
+    create = &Memory.call(Map.merge(%{"command" => "create"}, &1), @deps)
+
+    assert create.(%{"path" => "/memories/p/n"}) == {:error, "create needs file_text as string."}
+
+    assert create.(%{"path" => "/memories/p/n", "file_text" => "x", "title" => 1}) ==
+             {:error, "title must be a string."}
+
+    assert create.(%{"path" => "/memories", "file_text" => "x"}) ==
+             {:error, "create applies to notes and hubs only."}
+
+    rename = &Memory.call(Map.merge(%{"command" => "rename"}, &1), @deps)
+
+    assert rename.(%{"old_path" => "/memories/p/n"}) == {:error, "Missing new_path."}
+
+    assert {:error, "Invalid old_path \"/notes\"." <> _} =
+             rename.(%{"old_path" => "/notes", "new_path" => "/memories/p/n"})
+
+    assert rename.(%{"old_path" => "/memories/p", "new_path" => "/memories/q"}) ==
+             {:error, "rename applies to notes only."}
+
+    assert Memory.call(%{"command" => "delete", "path" => "/memories/p"}, @deps) ==
+             {:error, "delete applies to notes only."}
   end
 
   describe "writes" do
@@ -196,20 +235,34 @@ defmodule Spickzettel.MemoryTest do
                 "The note changed again while writing; nothing changed. View it and retry."}
     end
 
-    test "answers with the new path when the edit renames the note" do
-      renamed = %{@valid | text: String.replace(@valid.text, "name: tests", "name: mocks")}
-      expect(OutlineMock, :get_document, fn "note-1" -> {:ok, @valid} end)
-      expect(OutlineMock, :patch_document, fn "note-1", _patch, 12 -> {:ok, renamed} end)
-
-      expect(OutlineMock, :patch_document, fn "note-1", _patch, _revision ->
-        {:error, :conflict}
-      end)
-
-      expect(OutlineMock, :get_document, fn "note-1" -> {:error, {:status, 500}} end)
-      expect(IndexMock, :refresh, fn -> :ok end)
+    test "rejects str_replace and insert that change the note's name, pointing to rename" do
+      expect(OutlineMock, :get_document, 2, fn "note-1" -> {:ok, @valid} end)
 
       assert write("str_replace", %{"old_str" => "name: tests", "new_str" => "name: mocks"}) ==
-               {:ok, "ok · /memories/project/mocks · 2026-10-09\nWarning: stand was not updated."}
+               {:error,
+                "str_replace must not change the note's name, which is its slug; use rename. Nothing changed."}
+
+      assert {:error, "insert must not change the note's name" <> _} =
+               write("insert", %{
+                 "insert_line" => 0,
+                 "insert_text" => "`name: mocks` · `typ: feedback` · `stand: 2026-10-11`\n"
+               })
+    end
+
+    test "lets an edit add a header whose name keeps the slug" do
+      legacy = %{@valid | text: "**Kurz:** Fast.\n"}
+      header = "`name: tests` · `typ: reference` · `stand: 2026-10-11`\n"
+      expect(IndexMock, :lookup, fn "project", "tests" -> {:ok, %{legacy | text: nil}} end)
+      expect(OutlineMock, :get_document, fn "note-1" -> {:ok, legacy} end)
+
+      expect(OutlineMock, :patch_document, fn "note-1", patch, 12 ->
+        {:ok, patched(legacy, patch, 13)}
+      end)
+
+      expect(IndexMock, :refresh, fn -> :ok end)
+
+      assert write("insert", %{"insert_line" => 0, "insert_text" => header}) ==
+               {:ok, "ok · /memories/project/tests · 2026-10-11"}
     end
 
     test "rejects an edit that makes a valid note invalid without writing" do
@@ -232,6 +285,34 @@ defmodule Spickzettel.MemoryTest do
 
       assert {:ok, "ok · /memories/project/tests · 2026-10-11\nWarning: the note has 15" <> _} =
                write("str_replace", %{"old_str" => "Fast.", "new_str" => "Quick."})
+    end
+
+    test "does not warn about the dream log's length, which archiving handles" do
+      log = %Document{
+        id: "log",
+        title: "Dream log",
+        revision: 3,
+        text:
+          "`name: dream-log` · `typ: reference` · `stand: 2026-10-11`\n\n**Kurz:** Runs.\n\n" <>
+            String.duplicate("x", 15_000)
+      }
+
+      expect(IndexMock, :lookup, fn "General", "dream-log" -> {:ok, %{log | text: nil}} end)
+      expect(OutlineMock, :get_document, fn "log" -> {:ok, log} end)
+
+      expect(OutlineMock, :patch_document, fn "log", patch, 3 -> {:ok, patched(log, patch, 4)} end)
+
+      expect(IndexMock, :refresh, fn -> :ok end)
+
+      assert Memory.call(
+               %{
+                 "command" => "str_replace",
+                 "path" => "/memories/General/dream-log",
+                 "old_str" => "Runs.",
+                 "new_str" => "Dream runs."
+               },
+               @write_deps
+             ) == {:ok, "ok · /memories/General/dream-log · 2026-10-11"}
     end
 
     test "confirm leaves stand alone" do

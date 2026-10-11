@@ -8,7 +8,10 @@ if config_env() == :test do
   config :spickzettel,
     server: false,
     token: "test-token",
-    global_hub: "General"
+    global_hub: "General",
+    sections: [feedback: "Working style", project: "Project knowledge", reference: "References"],
+    dream_log: {:note, "General", "dream-log"},
+    dream_log_archive: {:note, "General", "dream-log-archive"}
 
   config :spickzettel, Spickzettel.Outline,
     url: "http://outline.test",

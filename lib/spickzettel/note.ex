@@ -4,10 +4,9 @@ defmodule Spickzettel.Note do
   alias Spickzettel.Document
 
   @header ~r/^`?name:/
-  @name ~r/^`?name:\s*([^\s`·]+)/u
-  @typ ~r/\btyp:\s*([a-z]+)/
-  @stand ~r/\bstand:\s*(\d{4}-\d{2}-\d{2})/
-  @stand_value ~r/(\bstand:\s*)\d{4}-\d{2}-\d{2}/
+  @name ~r/^(`?name:\s*)([^\s`·]+)/u
+  @typ ~r/(\btyp:\s*)([a-z]+)/
+  @stand ~r/(\bstand:\s*)(\d{4}-\d{2}-\d{2})/
   @label ~r/^\*\*[^*]+:\*\*\s*/u
   @heading ~r/^(\#{1,6})\s+(.+)$/u
   @fence ~r/^\s*(```|~~~)/
@@ -26,13 +25,21 @@ defmodule Spickzettel.Note do
 
   @doc "Sets `stand` in the header line; the 0-based index and the new line, or nil if unchanged."
   @spec put_stand(String.t(), Date.t()) :: {non_neg_integer(), String.t()} | nil
-  def put_stand(text, date) do
+  def put_stand(text, date), do: put_header(text, @stand, "\\g{1}#{date}")
+
+  @doc "Sets `name` in the header line; the 0-based index and the new line, or nil if unchanged."
+  @spec put_name(String.t(), String.t()) :: {non_neg_integer(), String.t()} | nil
+  def put_name(text, name), do: put_header(text, @name, "\\g{1}#{name}")
+
+  defp put_header(text, regex, replacement) do
     with {line, index} <-
            text |> String.split("\n") |> Enum.with_index() |> Enum.find(&present?/1),
-         true <- header_line?(String.trim(line)),
-         stamped = Regex.replace(@stand_value, line, "\\g{1}#{date}", global: false),
-         false <- stamped == line do
-      {index, stamped}
+         trimmed = String.trim_leading(line),
+         true <- header_line?(trimmed),
+         indent = binary_part(line, 0, byte_size(line) - byte_size(trimmed)),
+         changed = indent <> Regex.replace(regex, trimmed, replacement, global: false),
+         false <- changed == line do
+      {index, changed}
     else
       _ -> nil
     end
@@ -102,21 +109,18 @@ defmodule Spickzettel.Note do
   @spec line_count(String.t() | nil) :: non_neg_integer()
   def line_count(text), do: text |> lines() |> length()
 
-  defp header_value(text, regex) do
-    with [first | _] <- non_empty_lines(text),
-         true <- header_line?(first),
-         [_, value] <- Regex.run(regex, first) do
-      value
-    else
-      _ -> nil
-    end
-  end
+  @doc "The lines of the text without trailing blank lines."
+  @spec lines(String.t() | nil) :: [String.t()]
+  def lines(nil), do: []
+  def lines(text), do: text |> String.trim_trailing() |> String.split("\n")
 
-  defp header_line?(line), do: Regex.match?(@header, line)
+  @doc "A title as compared with another: trimmed and lowercase."
+  @spec normalize(String.t()) :: String.t()
+  def normalize(title), do: title |> String.trim() |> String.downcase()
 
-  defp present?({line, _index}), do: String.trim(line) != ""
-
-  defp heading_lines(text) do
+  @doc "The headings as `{line index, level, title}`, skipping code fences."
+  @spec heading_lines(String.t() | nil) :: [{non_neg_integer(), pos_integer(), String.t()}]
+  def heading_lines(text) do
     text
     |> lines()
     |> Enum.with_index()
@@ -152,14 +156,23 @@ defmodule Spickzettel.Note do
     end
   end
 
-  defp lines(nil), do: []
-  defp lines(text), do: text |> String.trim_trailing() |> String.split("\n")
+  defp header_value(text, regex) do
+    with [first | _] <- non_empty_lines(text),
+         true <- header_line?(first),
+         [_, _label, value] <- Regex.run(regex, first) do
+      value
+    else
+      _ -> nil
+    end
+  end
+
+  defp header_line?(line), do: Regex.match?(@header, line)
+
+  defp present?({line, _index}), do: String.trim(line) != ""
 
   defp non_empty_lines(text) do
     text |> lines() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
-
-  defp normalize(title), do: title |> String.trim() |> String.downcase()
 
   defp slugify(title) do
     title

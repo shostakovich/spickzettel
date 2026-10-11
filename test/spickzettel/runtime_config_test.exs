@@ -6,6 +6,8 @@ defmodule Spickzettel.RuntimeConfigTest do
   @environment %{
     "SPICKZETTEL_TOKEN" => String.duplicate("a", 64),
     "SPICKZETTEL_GLOBAL_HUB" => "General",
+    "SPICKZETTEL_DREAM_LOG" => "/memories/General/dream-log",
+    "SPICKZETTEL_DREAM_LOG_ARCHIVE" => "/memories/General/dream-log-archive",
     "OUTLINE_URL" => "http://outline.test",
     "OUTLINE_API_TOKEN" => "api-token",
     "OUTLINE_COLLECTION_ID" => "collection-1"
@@ -23,6 +25,23 @@ defmodule Spickzettel.RuntimeConfigTest do
         {name, nil} -> System.delete_env(name)
         {name, value} -> System.put_env(name, value)
       end)
+    end
+  end
+
+  test "parses the dream log paths once" do
+    config = read(%{})[:spickzettel]
+
+    assert config[:dream_log] == {:note, "General", "dream-log"}
+    assert config[:dream_log_archive] == {:note, "General", "dream-log-archive"}
+  end
+
+  test "refuses to boot with a dream log path that is not a note path" do
+    assert_raise RuntimeError, ~r/SPICKZETTEL_DREAM_LOG must be a note path/, fn ->
+      read(%{"SPICKZETTEL_DREAM_LOG" => "General/dream-log"})
+    end
+
+    assert_raise RuntimeError, ~r/SPICKZETTEL_DREAM_LOG_ARCHIVE must be a note path/, fn ->
+      read(%{"SPICKZETTEL_DREAM_LOG_ARCHIVE" => "/memories/General"})
     end
   end
 

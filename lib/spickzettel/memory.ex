@@ -5,9 +5,10 @@ defmodule Spickzettel.Memory do
 
   import Spickzettel.MemoryPath, only: [is_note: 1]
 
-  alias Spickzettel.{Edit, MemoryPath, Note, View, Write}
+  alias Spickzettel.{DreamLog, Edit, Lifecycle, Lookup, MemoryPath, Note, Reply, View, Write}
 
-  @commands ["view", "str_replace", "insert", "confirm"]
+  @commands ["view", "create", "str_replace", "insert", "delete", "rename", "confirm"]
+  @edits ["str_replace", "insert", "confirm"]
 
   @impl true
   def definition do
@@ -17,9 +18,17 @@ defmodule Spickzettel.Memory do
         "Read and edit the user's long-term memory. `view` a path: /memories lists the hubs, " <>
           "/memories/<hub> lists a hub's notes, /memories/<hub>/<slug> shows a note. " <>
           "Narrow a note with `section` (a heading) or `view_range` (lines of the note below its title). " <>
+          "`create` makes the note at `path` from `title`, `typ`, `file_text` (the summary line and " <>
+          "content; the server adds the header line) and an optional emoji `icon`, and links it in its " <>
+          "hub under the section for its typ, or under `section`, which `user` notes, pitfalls and the " <>
+          "cross-project hub require; " <>
+          "it reports similar notes. `create` at /memories/<hub> makes a project hub described by " <>
+          "`file_text` and links it under `section` of the cross-project hub. " <>
           "`str_replace` replaces the unique `old_str` with `new_str`; `insert` adds `insert_text` " <>
           "after line `insert_line`, counted below the title like `view_range` (0 for the top); " <>
           "both work on notes and hubs and set the note's stand. " <>
+          "`rename` moves a note from `old_path` to `new_path`, to a new slug, hub or both; `delete` " <>
+          "removes a note. Both keep the hubs' links in sync. " <>
           "`confirm` counts one more session in a note's evidence line when the note proved right.",
       inputSchema: %{
         type: "object",
@@ -29,7 +38,11 @@ defmodule Spickzettel.Memory do
             type: "string",
             description: "/memories, /memories/<hub> or /memories/<hub>/<slug>"
           },
-          section: %{type: "string", description: "Heading of the section to show"},
+          section: %{
+            type: "string",
+            description:
+              "view: heading of the section to show; create, rename: hub section for the link"
+          },
           view_range: %{
             type: "array",
             items: %{type: "integer"},
@@ -37,6 +50,10 @@ defmodule Spickzettel.Memory do
             maxItems: 2,
             description: "[first, last] line, 1-based; last -1 means to the end"
           },
+          title: %{type: "string", description: "Short, specific title of the new note"},
+          typ: %{type: "string", enum: Spickzettel.NoteFormat.typs()},
+          icon: %{type: "string", description: "Emoji hinting at the topic"},
+          file_text: %{type: "string", description: "Summary line and content of the new note"},
           old_str: %{type: "string", description: "Text to replace; must occur exactly once"},
           new_str: %{type: "string", description: "Replacement text"},
           insert_line: %{
@@ -48,9 +65,11 @@ defmodule Spickzettel.Memory do
             type: "string",
             description:
               "Markdown to insert; separate paragraphs with a blank line, also from the lines around it"
-          }
+          },
+          old_path: %{type: "string", description: "/memories/<hub>/<slug> of the note to rename"},
+          new_path: %{type: "string", description: "Its new /memories/<hub>/<slug>"}
         },
-        required: ["command", "path"]
+        required: ["command"]
       }
     }
   end
@@ -60,41 +79,115 @@ defmodule Spickzettel.Memory do
     do: call(arguments, index: Spickzettel.Index, outline: Spickzettel.Outline, today: &today/0)
 
   @spec call(map(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
-  def call(%{"command" => "view"} = arguments, deps) do
+  def call(arguments, deps),
+    do: run(without_nils(arguments), Map.merge(settings(), Map.new(deps)))
+
+  defp run(%{"command" => "view"} = arguments, deps) do
     with {:ok, path} <- fetch_path(arguments),
          {:ok, scope} <- fetch_scope(arguments) do
-      view(path, scope, Map.new(deps))
+      view(path, scope, deps)
     end
   end
 
-  def call(%{"command" => command} = arguments, deps)
-      when command in ["str_replace", "insert", "confirm"] do
-    deps = Map.new(deps)
+  defp run(%{"command" => "create"} = arguments, deps) do
+    with {:ok, path} <- fetch_path(arguments),
+         {:ok, new} <- fetch_new(arguments) do
+      if path == :root,
+        do: {:error, "create applies to notes and hubs only."},
+        else: Lifecycle.create(path, new, deps)
+    end
+  end
 
+  defp run(%{"command" => "rename"} = arguments, deps) do
+    with {:ok, from} <- fetch_path(arguments, "old_path"),
+         {:ok, to} <- fetch_path(arguments, "new_path"),
+         {:ok, section} <- fetch_optional(arguments, "section") do
+      if is_note(from) and is_note(to),
+        do: Lifecycle.rename(from, to, section, deps),
+        else: {:error, "rename applies to notes only."}
+    end
+  end
+
+  defp run(%{"command" => "delete"} = arguments, deps) do
+    with {:ok, path} <- fetch_path(arguments) do
+      if is_note(path),
+        do: Lifecycle.delete(path, deps),
+        else: {:error, "delete applies to notes only."}
+    end
+  end
+
+  defp run(%{"command" => command} = arguments, deps) when command in @edits do
     with {:ok, path} <- fetch_path(arguments),
          {:ok, edit} <- fetch_edit(command, arguments, deps) do
       write(path, command, edit, deps)
     end
   end
 
-  def call(%{"command" => command}, _deps) when is_binary(command),
+  defp run(%{"command" => command}, _deps) when is_binary(command),
     do: {:error, "Unknown command #{inspect(command)}. Commands: #{Enum.join(@commands, ", ")}."}
 
-  def call(_arguments, _deps),
+  defp run(_arguments, _deps),
     do: {:error, "Missing command. Commands: #{Enum.join(@commands, ", ")}."}
 
-  defp fetch_path(%{"path" => path}) when is_binary(path) do
+  defp without_nils(arguments) when is_map(arguments),
+    do: Map.reject(arguments, fn {_key, value} -> is_nil(value) end)
+
+  defp without_nils(arguments), do: arguments
+
+  defp settings do
+    config = Application.get_all_env(:spickzettel)
+
+    %{
+      global_hub: config[:global_hub],
+      sections: Map.new(config[:sections], fn {typ, section} -> {to_string(typ), section} end),
+      dream_log: config[:dream_log],
+      dream_log_archive: config[:dream_log_archive]
+    }
+  end
+
+  defp fetch_path(arguments, key \\ "path") do
+    case Map.get(arguments, key) do
+      path when is_binary(path) -> parse_path(path, key)
+      _missing -> {:error, "Missing #{key}."}
+    end
+  end
+
+  defp parse_path(path, key) do
     case MemoryPath.parse(path) do
       {:ok, parsed} ->
         {:ok, parsed}
 
       :error ->
         {:error,
-         "Invalid path #{inspect(path)}. Use /memories, /memories/<hub> or /memories/<hub>/<slug>."}
+         "Invalid #{key} #{inspect(path)}. Use /memories, /memories/<hub> or /memories/<hub>/<slug>."}
     end
   end
 
-  defp fetch_path(_arguments), do: {:error, "Missing path."}
+  defp fetch_new(arguments) do
+    with {:ok, title} <- fetch_optional(arguments, "title"),
+         {:ok, typ} <- fetch_optional(arguments, "typ"),
+         {:ok, icon} <- fetch_optional(arguments, "icon"),
+         {:ok, section} <- fetch_optional(arguments, "section") do
+      case arguments do
+        %{"file_text" => text} when is_binary(text) ->
+          {:ok, %{title: title, typ: typ, icon: icon, text: text, section: section}}
+
+        _arguments ->
+          {:error, "create needs file_text as string."}
+      end
+    end
+  end
+
+  defp fetch_optional(arguments, key) do
+    case Map.get(arguments, key) do
+      nil -> {:ok, nil}
+      value when is_binary(value) -> {:ok, present(String.trim(value))}
+      _value -> {:error, "#{key} must be a string."}
+    end
+  end
+
+  defp present(""), do: nil
+  defp present(value), do: value
 
   defp fetch_edit("str_replace", %{"old_str" => old, "new_str" => new}, _deps)
        when is_binary(old) and is_binary(new),
@@ -135,21 +228,20 @@ defmodule Spickzettel.Memory do
     do: {:error, "section and view_range apply to notes only."}
 
   defp view(:root, :all, deps) do
-    with {:ok, hubs} <- outline_result(deps.index.hubs()) do
+    with {:ok, hubs} <- Reply.outline(deps.index.hubs()) do
       {:ok, View.hubs(hubs)}
     end
   end
 
   defp view({:hub, _name} = path, :all, deps) do
-    with {:ok, hub} <- found(lookup(path, deps), missing(path)),
-         {:ok, notes} <- outline_result(deps.outline.list_documents(hub.id)) do
+    with {:ok, hub} <- Lookup.entry(path, deps),
+         {:ok, notes} <- Reply.outline(deps.outline.list_documents(hub.id)) do
       {:ok, View.hub(hub, notes)}
     end
   end
 
   defp view({:note, _hub, _slug} = path, scope, deps) do
-    with {:ok, %{id: id}} <- found(lookup(path, deps), missing(path)),
-         {:ok, note} <- gone(deps.outline.get_document(id), path, deps) do
+    with {:ok, note} <- Lookup.document(path, deps) do
       narrow(note, scope, MemoryPath.to_string(path))
     end
   end
@@ -161,41 +253,40 @@ defmodule Spickzettel.Memory do
     do: {:error, "#{command} applies to notes and hubs only."}
 
   defp write(path, command, edit, deps) do
-    options = [check_format: match?({:note, _hub, _slug}, path), stamp: command != "confirm"]
+    options = [
+      check_format: is_note(path),
+      check_length: path != deps.dream_log,
+      stamp: command != "confirm"
+    ]
 
-    with {:ok, %{id: id}} <- found(lookup(path, deps), missing(path)),
-         {:ok, written, warnings} <- gone(Write.run(id, edit, deps, options), path, deps) do
+    with {:ok, entry} <- Lookup.entry(path, deps),
+         edit = keep_slug(path, entry, command, edit),
+         {:ok, written, warnings} <-
+           Lookup.gone(Write.run(entry.id, edit, deps, options), path, deps) do
+      archived = DreamLog.archive(path, written, deps)
       deps.index.refresh()
-      {:ok, written_reply(path, written, warnings)}
+      {:ok, Reply.written(written_path(path, written), written, warnings ++ archived)}
     end
   end
 
-  defp lookup({:hub, name}, deps), do: deps.index.lookup(name, nil)
-  defp lookup({:note, hub, slug}, deps), do: deps.index.lookup(hub, slug)
-
-  defp written_reply(path, document, warnings) do
-    path =
-      case path do
-        {:note, hub, _slug} -> MemoryPath.to_string({:note, hub, Note.slug(document)})
-        hub -> MemoryPath.to_string(hub)
+  defp keep_slug({:note, _hub, _slug}, entry, command, edit) when command != "confirm" do
+    fn text ->
+      with {:ok, patch} <- edit.(text) do
+        if Note.slug(%{entry | text: Edit.apply(text, patch)}) == Note.slug(%{entry | text: text}),
+          do: {:ok, patch},
+          else:
+            {:error,
+             "#{command} must not change the note's name, which is its slug; use rename. Nothing changed."}
       end
-
-    line = Enum.join(["ok", path | List.wrap(Note.stand(document.text))], " · ")
-    Enum.join([line | warnings], "\n")
+    end
   end
 
-  defp gone({:error, :not_found}, path, deps) do
-    deps.index.refresh()
-    {:error, missing(path)}
-  end
+  defp keep_slug(_path, _entry, _command, edit), do: edit
 
-  defp gone(result, _path, _deps), do: outline_result(result)
+  defp written_path({:note, hub, _slug}, document),
+    do: MemoryPath.to_string({:note, hub, Note.slug(document)})
 
-  defp missing({:hub, name}),
-    do: "No hub at #{MemoryPath.hub(name)}. View /memories to list the hubs."
-
-  defp missing({:note, hub, _slug} = path),
-    do: "No note at #{MemoryPath.to_string(path)}. View #{MemoryPath.hub(hub)} to list its notes."
+  defp written_path(hub, _document), do: MemoryPath.to_string(hub)
 
   defp today, do: NaiveDateTime.local_now() |> NaiveDateTime.to_date()
 
@@ -224,23 +315,4 @@ defmodule Spickzettel.Memory do
       headings -> "Sections: #{Enum.join(headings, ", ")}."
     end
   end
-
-  defp found({:error, :not_found}, message), do: {:error, message}
-  defp found(result, _message), do: outline_result(result)
-
-  defp outline_result({:ok, _value} = result), do: result
-  defp outline_result({:ok, _value, _warnings} = result), do: result
-  defp outline_result({:error, message}) when is_binary(message), do: {:error, message}
-
-  defp outline_result({:error, {:rejected, message}}),
-    do: {:error, "Outline rejected the edit (#{message}); nothing changed."}
-
-  defp outline_result({:error, {:status, status}}),
-    do: {:error, "Outline answered with status #{status}."}
-
-  defp outline_result({:error, %{__exception__: true} = exception}),
-    do: {:error, "Outline is unreachable: #{Exception.message(exception)}"}
-
-  defp outline_result({:error, reason}),
-    do: {:error, "Outline request failed: #{inspect(reason)}"}
 end

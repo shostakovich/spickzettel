@@ -46,15 +46,30 @@ defmodule Spickzettel.NoteTest do
     assert Note.put_stand("Text, stand: 2026-01-01\n", ~D[2026-10-11]) == nil
   end
 
+  test "sets name in the header line" do
+    assert Note.put_name(@text, "london") ==
+             {0, "`name: london` · `typ: feedback` · `stand: 2026-10-09`"}
+
+    assert Note.put_name("  name: a · typ: user\n", "b") == {0, "  name: b · typ: user"}
+    assert Note.put_name(@text, "tests-london-style") == nil
+    assert Note.put_name("Text.\n", "x") == nil
+  end
+
+  test "lists headings with line index and level, skipping code fences" do
+    assert Note.heading_lines(@text) ==
+             [{4, 2, "Mocks"}, {12, 3, "Seams"}, {16, 2, "Integration"}]
+  end
+
   test "strips a closing sequence of #s only after whitespace" do
     text = "## C#\n\n## Mocks ##  \n\n### ###\n\n## Issue \\#\n"
 
-    assert Note.headings(text) == ["C#", "Mocks", "", "Issue \\#"]
+    assert Note.heading_lines(text) ==
+             [{0, 2, "C#"}, {2, 2, "Mocks"}, {4, 3, ""}, {6, 2, "Issue \\#"}]
   end
 
   test "parses a long heading without backtracking" do
     line = "## x" <> String.duplicate(" ", 20_000) <> "y"
-    {microseconds, [_title]} = :timer.tc(fn -> Note.headings(line) end)
+    {microseconds, [{0, 2, _title}]} = :timer.tc(fn -> Note.heading_lines(line) end)
     assert microseconds < 50_000
   end
 

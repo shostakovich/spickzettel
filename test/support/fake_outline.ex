@@ -7,25 +7,61 @@ defmodule Spickzettel.FakeOutline do
 
   @collection "collection-1"
 
+  @dream_log_runs (for {date, size} <- [
+                         {"2026-10-10", 6_000},
+                         {"2026-10-09", 5_000},
+                         {"2026-10-08", 3_000}
+                       ] do
+                     "## #{date} · Dream\n\n" <> String.duplicate("z", size) <> "\n"
+                   end)
+
   @documents [
     %{
       "id" => "hub-general",
+      "urlId" => "GEN1",
       "title" => "General",
       "icon" => "📒",
       "parentDocumentId" => nil,
       "revision" => 3,
-      "text" => "Rules for every project.\n"
+      "text" => """
+      Rules for every project.
+
+      ## Code
+
+      * 🇬🇧 [English in repositories](http://outline.test/doc/ENG1) — Code and docs in English.
+
+      ## Projects
+
+      * 📝 [spickzettel](http://outline.test/doc/SPZ1) — The memory server.
+      """
     },
     %{
       "id" => "hub-project",
+      "urlId" => "SPZ1",
       "title" => "spickzettel",
       "icon" => "📝",
       "parentDocumentId" => nil,
       "revision" => 5,
-      "text" => "The memory server.\n"
+      "text" => """
+      The memory server.
+
+      ## Working style
+
+      * 🧪 [Tests: London style](http://outline.test/doc/TST1) — Many fast unit tests, few integration tests.
+      """
+    },
+    %{
+      "id" => "hub-other",
+      "urlId" => "OTH1",
+      "title" => "other",
+      "icon" => nil,
+      "parentDocumentId" => nil,
+      "revision" => 1,
+      "text" => "Another project.\n"
     },
     %{
       "id" => "note-tests",
+      "urlId" => "TST1",
       "title" => "Tests: London style",
       "icon" => "🧪",
       "parentDocumentId" => "hub-project",
@@ -56,6 +92,7 @@ defmodule Spickzettel.FakeOutline do
     },
     %{
       "id" => "note-release",
+      "urlId" => "REL1",
       "title" => "Release checklist",
       "icon" => nil,
       "parentDocumentId" => "hub-project",
@@ -64,12 +101,31 @@ defmodule Spickzettel.FakeOutline do
     },
     %{
       "id" => "note-english",
+      "urlId" => "ENG1",
       "title" => "English in repositories",
       "icon" => "🇬🇧",
       "parentDocumentId" => "hub-general",
       "revision" => 7,
       "text" =>
         "`name: english-in-repos` · `typ: feedback` · `stand: 2026-10-01`\n\n**Kurz:** Code and docs in English.\n"
+    },
+    %{
+      "id" => "note-dream-log",
+      "urlId" => "DRM1",
+      "title" => "Dream log",
+      "icon" => "🌙",
+      "parentDocumentId" => "hub-general",
+      "revision" => 20,
+      "text" => Enum.join(["Runs, newest first.\n" | @dream_log_runs], "\n")
+    },
+    %{
+      "id" => "note-dream-log-archive",
+      "urlId" => "ARC1",
+      "title" => "Dream log archive",
+      "icon" => "🗃️",
+      "parentDocumentId" => "note-dream-log",
+      "revision" => 2,
+      "text" => "Older runs, newest first.\n\n## 2026-10-01 · Dream\n\nOld run.\n"
     }
   ]
 
@@ -81,11 +137,8 @@ defmodule Spickzettel.FakeOutline do
   def text(id), do: document(id)["text"]
 
   @doc "Saves a document as the browser would, as a new revision."
-  def save_in_browser(id, fun) do
-    Agent.update(__MODULE__, fn state ->
-      update_in(state.documents, &Enum.map(&1, fn doc -> save(doc, id, fun) end))
-    end)
-  end
+  def save_in_browser(id, fun),
+    do: save(id, &%{&1 | "text" => fun.(&1["text"]), "revision" => &1["revision"] + 1})
 
   @doc "Runs `fun` once, right before the next update is applied."
   def before_next_update(fun), do: Agent.update(__MODULE__, &%{&1 | before_update: fun})
@@ -112,7 +165,61 @@ defmodule Spickzettel.FakeOutline do
       conn.request_path == "/api/documents.update" ->
         run_before_update()
         update(conn, params)
+
+      conn.request_path == "/api/documents.create" ->
+        Req.Test.json(conn, %{"data" => create(params)})
+
+      conn.request_path == "/api/documents.move" ->
+        save(params["id"], &Map.put(&1, "parentDocumentId", params["parentDocumentId"]))
+        Req.Test.json(conn, %{"data" => %{"documents" => [document(params["id"])]}})
+
+      conn.request_path == "/api/documents.delete" ->
+        Agent.update(__MODULE__, fn state ->
+          update_in(state.documents, &Enum.reject(&1, fn doc -> doc["id"] == params["id"] end))
+        end)
+
+        Req.Test.json(conn, %{"success" => true})
+
+      conn.request_path == "/api/documents.search" ->
+        Req.Test.json(conn, %{"data" => search(params)})
     end
+  end
+
+  @doc "Returns the document with the given title."
+  def titled(title),
+    do: Agent.get(__MODULE__, &Enum.find(&1.documents, fn d -> d["title"] == title end))
+
+  defp create(params) do
+    Agent.get_and_update(__MODULE__, fn state ->
+      n = length(state.documents) + 1
+
+      document = %{
+        "id" => "doc-#{n}",
+        "urlId" => "NEW#{n}",
+        "title" => params["title"],
+        "icon" => params["icon"],
+        "parentDocumentId" => params["parentDocumentId"],
+        "revision" => 1,
+        "text" => params["text"]
+      }
+
+      {document, update_in(state.documents, &(&1 ++ [document]))}
+    end)
+  end
+
+  defp search(%{"query" => query, "collectionId" => @collection, "limit" => limit}) do
+    terms = String.split(query, " | ")
+
+    __MODULE__
+    |> Agent.get(& &1.documents)
+    |> Enum.map(fn doc ->
+      content = String.downcase(doc["title"] <> " " <> doc["text"])
+      {doc, Enum.count(terms, &String.contains?(content, &1))}
+    end)
+    |> Enum.filter(fn {_doc, hits} -> hits > 0 end)
+    |> Enum.sort_by(fn {_doc, hits} -> hits end, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn {doc, hits} -> %{"ranking" => hits, "context" => "", "document" => doc} end)
   end
 
   defp update(conn, %{"editMode" => "patch", "findText" => find, "text" => replacement} = params) do
@@ -141,10 +248,14 @@ defmodule Spickzettel.FakeOutline do
     end
   end
 
-  defp save(%{"id" => id} = doc, id, fun),
-    do: %{doc | "text" => fun.(doc["text"]), "revision" => doc["revision"] + 1}
-
-  defp save(doc, _id, _fun), do: doc
+  defp save(id, fun) do
+    Agent.update(__MODULE__, fn state ->
+      update_in(
+        state.documents,
+        &Enum.map(&1, fn doc -> if doc["id"] == id, do: fun.(doc), else: doc end)
+      )
+    end)
+  end
 
   defp document(id),
     do: Agent.get(__MODULE__, &Enum.find(&1.documents, fn d -> d["id"] == id end))

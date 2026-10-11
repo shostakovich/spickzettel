@@ -115,4 +115,100 @@ defmodule Spickzettel.OutlineTest do
     assert Outline.list_documents(nil) == {:error, {:status, 401}}
     assert {:error, %Req.TransportError{reason: :timeout}} = Outline.get_document("doc-1")
   end
+
+  test "builds the document link from its url id" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      Req.Test.json(conn, %{"data" => Map.put(document(1), "urlId", "AbC123")})
+    end)
+
+    assert {:ok, %Document{url_id: "AbC123", url: "http://outline.test/doc/AbC123"}} =
+             Outline.get_document("doc-1")
+  end
+
+  test "creates a published document under its parent" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert conn.request_path == "/api/documents.create"
+
+      assert params(conn) == %{
+               "collectionId" => "collection-1",
+               "parentDocumentId" => "hub",
+               "title" => "Doc 1",
+               "text" => "Text 1",
+               "icon" => "🧪",
+               "publish" => true
+             }
+
+      Req.Test.json(conn, %{"data" => document(1)})
+    end)
+
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      refute Map.has_key?(params(conn), "icon")
+      Req.Test.json(conn, %{"data" => document(2)})
+    end)
+
+    assert {:ok, %Document{id: "doc-1"}} =
+             Outline.create_document(%{
+               title: "Doc 1",
+               text: "Text 1",
+               icon: "🧪",
+               parent_id: "hub"
+             })
+
+    assert {:ok, %Document{id: "doc-2"}} =
+             Outline.create_document(%{
+               title: "Doc 2",
+               text: "Text 2",
+               icon: nil,
+               parent_id: "hub"
+             })
+  end
+
+  test "moves a document under another parent" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert conn.request_path == "/api/documents.move"
+
+      assert params(conn) == %{
+               "id" => "doc-1",
+               "collectionId" => "collection-1",
+               "parentDocumentId" => "hub-2"
+             }
+
+      Req.Test.json(conn, %{"data" => %{"documents" => [document(1)]}})
+    end)
+
+    assert Outline.move_document("doc-1", "hub-2") == :ok
+  end
+
+  test "deletes a document" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert conn.request_path == "/api/documents.delete"
+      assert params(conn) == %{"id" => "doc-1"}
+      Req.Test.json(conn, %{"success" => true})
+    end)
+
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      Req.Test.json(Plug.Conn.put_status(conn, 404), %{})
+    end)
+
+    assert Outline.delete_document("doc-1") == :ok
+    assert Outline.delete_document("gone") == {:error, :not_found}
+  end
+
+  test "searches the collection for any of the terms" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert conn.request_path == "/api/documents.search"
+
+      assert params(conn) == %{
+               "query" => "mocks | london",
+               "collectionId" => "collection-1",
+               "limit" => 10
+             }
+
+      Req.Test.json(conn, %{
+        "data" => [%{"ranking" => 0.5, "context" => "…", "document" => document(1)}]
+      })
+    end)
+
+    assert {:ok, [%Document{id: "doc-1"}]} = Outline.search_documents(["mocks", "london"], 10)
+  end
 end

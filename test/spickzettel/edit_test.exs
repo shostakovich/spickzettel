@@ -69,6 +69,22 @@ defmodule Spickzettel.EditTest do
     end
   end
 
+  describe "insert_before" do
+    test "inserts a block before a line, separated by a blank line" do
+      assert applied(@text, Edit.insert_before(@text, 6, "## Intro\n\n- One.")) ==
+               String.replace(@text, "## Mocks", "## Intro\n\n- One.\n\n## Mocks")
+    end
+  end
+
+  describe "remove_line" do
+    test "removes a repeated line at its own position, anchored with the line before" do
+      result = Edit.remove_line(@text, 8)
+
+      assert result == {:ok, {"## Mocks\n\n- Mox.", "## Mocks\n"}}
+      assert applied(@text, result) == String.replace_suffix(@text, "\n- Mox.\n", "\n")
+    end
+  end
+
   describe "confirm" do
     test "increments the evidence count and sets its date, keeping the label" do
       text = "`name: x`\n\n**Kurz:** X.\n\n**Belege:** 2 Sessions, zuletzt 2026-10-01\n"

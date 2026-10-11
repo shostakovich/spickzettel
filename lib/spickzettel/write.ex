@@ -10,11 +10,12 @@ defmodule Spickzettel.Write do
   @max_length 15_000
 
   @type edit :: (String.t() -> Edit.result())
-  @type option :: {:check_format, boolean()} | {:stamp, boolean()}
+  @type option :: {:check_format, boolean()} | {:check_length, boolean()} | {:stamp, boolean()}
 
   @doc """
   Applies `edit` to the document. `check_format` rejects edits that make a valid note invalid,
-  `stamp` sets the note's `stand` to today afterwards.
+  `check_length: false` leaves out the length warning, `stamp` sets the note's `stand` to today
+  afterwards.
   """
   @spec run(String.t(), edit(), map(), [option()]) ::
           {:ok, Document.t(), [String.t()]} | {:error, String.t() | Outline.error()}
@@ -76,18 +77,23 @@ defmodule Spickzettel.Write do
          "Rejected: the note would become invalid: #{Enum.join(new, "; ")}. Nothing changed."}
 
       {_before, []} ->
-        {:ok, length_warnings(edited)}
+        {:ok, length_warnings(edited, options)}
 
       {_before, remaining} ->
         {:ok,
          [
            "Warning: the note is invalid: #{Enum.join(remaining, "; ")}."
-           | length_warnings(edited)
+           | length_warnings(edited, options)
          ]}
     end
   end
 
-  defp length_warnings(text) do
+  defp length_warnings(text, options) do
+    if Keyword.get(options, :check_length, true), do: length_warnings(text), else: []
+  end
+
+  @spec length_warnings(String.t()) :: [String.t()]
+  def length_warnings(text) do
     case String.length(text) do
       length when length > @max_length ->
         [

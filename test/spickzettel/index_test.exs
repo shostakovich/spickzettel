@@ -63,6 +63,15 @@ defmodule Spickzettel.IndexTest do
     assert Index.hubs(index) == {:ok, [compact(@project)]}
   end
 
+  test "finds the path of a hub or note by id, rebuilding when unknown", %{index: index} do
+    expect(OutlineMock, :list_documents, fn nil -> {:ok, [@project]} end)
+    expect(OutlineMock, :list_documents, 2, fn nil -> {:ok, [@project, @note, @archive]} end)
+
+    assert Index.path("hub-2", index) == {:ok, {:hub, "project"}}
+    assert Index.path("note-2", index) == {:ok, {:note, "project", "old-archive"}}
+    assert Index.path("gone", index) == {:error, :not_found}
+  end
+
   test "refreshes on demand", %{index: index} do
     expect(OutlineMock, :list_documents, fn nil -> {:ok, [@project]} end)
     expect(OutlineMock, :list_documents, fn nil -> {:ok, [@general]} end)

@@ -59,6 +59,21 @@ defmodule Spickzettel.Edit do
     end)
   end
 
+  @doc "Inserts a block before the line at the 0-based `index`, separated by a blank line."
+  @spec insert_before(String.t(), non_neg_integer(), String.t()) :: result()
+  def insert_before(text, index, block) do
+    line = text |> String.split("\n") |> Enum.at(index)
+    replace_line(text, index, block <> "\n\n" <> line)
+  end
+
+  @doc "Removes the line at the 0-based `index`, which must not be the first line."
+  @spec remove_line(String.t(), pos_integer()) :: result()
+  def remove_line(text, index) when index > 0 do
+    anchor_before(text, index, index - 1, fn window ->
+      {window, window |> String.split("\n") |> Enum.drop(-1) |> Enum.join("\n")}
+    end)
+  end
+
   @doc "Counts one more session in the evidence line and sets its date, adding the line if missing."
   @spec confirm(String.t(), Date.t()) :: result()
   def confirm(text, date) do
@@ -79,10 +94,12 @@ defmodule Spickzettel.Edit do
   defp evidence(1, date), do: "1 session, last #{date}"
   defp evidence(count, date), do: "#{count} sessions, last #{date}"
 
-  defp anchor_before(text, index, patch) do
+  defp anchor_before(text, index, patch), do: anchor_before(text, index, index, patch)
+
+  defp anchor_before(text, index, from, patch) do
     lines = String.split(text, "\n")
 
-    Enum.find_value(index..0//-1, no_anchor(), fn first ->
+    Enum.find_value(from..0//-1, no_anchor(), fn first ->
       window = lines |> Enum.slice(first..index) |> Enum.join("\n")
 
       if not blank?(window) and first_offset(text, window) == offset(lines, first),

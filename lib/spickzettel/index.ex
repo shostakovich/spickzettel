@@ -8,11 +8,13 @@ defmodule Spickzettel.Index do
 
   use GenServer
 
-  alias Spickzettel.{Document, Note, Outline}
+  alias Spickzettel.{Document, MemoryPath, Note, Outline}
 
   @callback hubs() :: {:ok, [Document.t()]} | {:error, Outline.error()}
   @callback lookup(hub :: String.t(), slug :: String.t() | nil) ::
               {:ok, Document.t()} | {:error, :not_found | Outline.error()}
+  @callback path(id :: String.t()) ::
+              {:ok, MemoryPath.t()} | {:error, :not_found | Outline.error()}
   @callback refresh() :: :ok | {:error, Outline.error()}
 
   # A rebuild lists the whole collection, page by page, inside the call.
@@ -29,6 +31,9 @@ defmodule Spickzettel.Index do
   @doc "Finds a hub, or a note when `slug` is given."
   def lookup(hub, slug, server \\ __MODULE__),
     do: GenServer.call(server, {:lookup, hub, slug}, @timeout)
+
+  @doc "Finds the path of a hub or note by its Outline id."
+  def path(id, server \\ __MODULE__), do: GenServer.call(server, {:path, id}, @timeout)
 
   def refresh(server \\ __MODULE__), do: GenServer.call(server, :refresh, @timeout)
 
@@ -48,13 +53,11 @@ defmodule Spickzettel.Index do
   end
 
   def handle_call({:lookup, hub, slug}, _from, state) do
-    with :error <- find(state.entries, hub, slug),
-         {:ok, state} <- rebuild(state) do
-      {:reply, find(state.entries, hub, slug) |> not_found(), state}
-    else
-      {:ok, document} -> {:reply, {:ok, document}, state}
-      error -> {:reply, error, state}
-    end
+    find_or_rebuild(state, &find(&1, hub, slug))
+  end
+
+  def handle_call({:path, id}, _from, state) do
+    find_or_rebuild(state, &find_path(&1, id))
   end
 
   def handle_call(:refresh, _from, state) do
@@ -63,6 +66,19 @@ defmodule Spickzettel.Index do
       error -> {:reply, error, state}
     end
   end
+
+  defp find_or_rebuild(state, find) do
+    with :error <- find.(state.entries),
+         {:ok, state} <- rebuild(state) do
+      {:reply, find.(state.entries) |> not_found(), state}
+    else
+      {:ok, found} -> {:reply, {:ok, found}, state}
+      error -> {:reply, error, state}
+    end
+  end
+
+  defp find_path(nil, _id), do: :error
+  defp find_path(entries, id), do: Map.fetch(entries.paths, id)
 
   defp find(nil, _hub, _slug), do: :error
   defp find(entries, hub, nil), do: Map.fetch(entries.hubs, key(hub))
@@ -89,7 +105,11 @@ defmodule Spickzettel.Index do
           into: %{},
           do: {{key(hub.title), Note.slug(note)}, compact(note)}
 
-    %{hubs: hubs, notes: notes}
+    paths =
+      Map.new(hubs, fn {title, hub} -> {hub.id, {:hub, title}} end)
+      |> Map.merge(Map.new(notes, fn {{hub, slug}, note} -> {note.id, {:note, hub, slug}} end))
+
+    %{hubs: hubs, notes: notes, paths: paths}
   end
 
   defp root(%Document{parent_id: nil} = document, _by_id), do: document

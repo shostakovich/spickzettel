@@ -326,8 +326,8 @@ defmodule Spickzettel.MemoryTest do
     test "confirm leaves stand alone" do
       expect(OutlineMock, :get_document, fn "note-1" -> {:ok, @valid} end)
 
-      expect(OutlineMock, :patch_document, fn "note-1", {_find, replace} = patch, 12 ->
-        assert replace =~ "**Evidence:** 1 session, last 2026-10-11"
+      expect(OutlineMock, :patch_document, fn "note-1", {:append, block} = patch, 12 ->
+        assert block == "**Evidence:** 1 session, last 2026-10-11"
         {:ok, patched(@valid, patch, 13)}
       end)
 

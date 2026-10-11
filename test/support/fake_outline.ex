@@ -226,23 +226,33 @@ defmodule Spickzettel.FakeOutline do
     |> Enum.map(fn {doc, hits} -> %{"ranking" => hits, "context" => "", "document" => doc} end)
   end
 
-  defp update(conn, %{"editMode" => "patch", "findText" => find, "text" => replacement} = params) do
+  defp update(conn, params) do
     document = document(params["id"])
 
     cond do
-      document == nil ->
-        not_found(conn)
-
-      params["lastRevision"] != document["revision"] ->
-        error(conn, 409, "document_conflict")
-
-      not String.contains?(document["text"], find) ->
-        error(conn, 400, "validation_error", "The specified text was not found in the document")
-
-      true ->
-        save_in_browser(document["id"], &String.replace(&1, find, replacement, global: false))
-        Req.Test.json(conn, %{"data" => document(document["id"])})
+      document == nil -> not_found(conn)
+      params["lastRevision"] != document["revision"] -> error(conn, 409, "document_conflict")
+      true -> edit(conn, document["id"], document["text"], params)
     end
+  end
+
+  defp edit(conn, id, text, %{"editMode" => "patch", "findText" => find, "text" => replacement}) do
+    if String.contains?(text, find),
+      do: saved(conn, id, &String.replace(&1, find, replacement, global: false)),
+      else:
+        error(conn, 400, "validation_error", "The specified text was not found in the document")
+  end
+
+  defp edit(conn, id, _text, %{"editMode" => "append", "text" => appended}),
+    do: saved(conn, id, &(String.trim_trailing(&1) <> "\n\n" <> String.trim(appended) <> "\n"))
+
+  defp edit(conn, id, _text, %{"text" => replacement} = params)
+       when not is_map_key(params, "editMode"),
+       do: saved(conn, id, fn _text -> replacement end)
+
+  defp saved(conn, id, fun) do
+    save_in_browser(id, fun)
+    Req.Test.json(conn, %{"data" => document(id)})
   end
 
   defp run_before_update do

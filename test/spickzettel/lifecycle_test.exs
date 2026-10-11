@@ -73,8 +73,8 @@ defmodule Spickzettel.LifecycleTest do
   end
 
   defp expect_patch(%Document{id: id, revision: revision} = document, check) do
-    expect(OutlineMock, :patch_document, fn ^id, {find, replace}, ^revision ->
-      text = Edit.apply(document.text, {find, replace})
+    expect(OutlineMock, :patch_document, fn ^id, patch, ^revision ->
+      text = Edit.apply(document.text, patch)
       check.(text)
       {:ok, %{document | text: text, revision: revision + 1}}
     end)

@@ -55,6 +55,20 @@ defmodule Spickzettel.EditTest do
       assert applied("One\n", Edit.insert("One\n", 1, "Two\n\n")) == "One\nTwo\n"
     end
 
+    test "anchors a new block on a window reaching into the block before, so Outline re-parses it" do
+      text = "Intro.\n\n## Knowledge\n\n* [One](http://outline.test/doc/ONE1) — First.\n"
+
+      assert Edit.insert(text, 5, "\n## Style\n\n* Two") ==
+               {:ok,
+                {"## Knowledge\n\n* [One](http://outline.test/doc/ONE1) — First.",
+                 "## Knowledge\n\n* [One](http://outline.test/doc/ONE1) — First.\n\n## Style\n\n* Two"}}
+
+      assert Edit.insert(text, 5, "* Two") ==
+               {:ok,
+                {"* [One](http://outline.test/doc/ONE1) — First.",
+                 "* [One](http://outline.test/doc/ONE1) — First.\n* Two"}}
+    end
+
     test "fails for a line outside the note or an empty text" do
       assert Edit.insert(@text, 10, "x") == {:error, "insert_line must be between 0 and 9."}
       assert Edit.insert(@text, -1, "x") == {:error, "insert_line must be between 0 and 9."}
@@ -73,6 +87,24 @@ defmodule Spickzettel.EditTest do
     test "inserts a block before a line, separated by a blank line" do
       assert applied(@text, Edit.insert_before(@text, 6, "## Intro\n\n- One.")) ==
                String.replace(@text, "## Mocks", "## Intro\n\n- One.\n\n## Mocks")
+    end
+
+    test "anchors on a window reaching into the block before" do
+      assert Edit.insert_before(@text, 6, "## Intro") ==
+               {:ok, {"- Mox.\n\n## Mocks", "- Mox.\n\n## Intro\n\n## Mocks"}}
+    end
+  end
+
+  describe "append" do
+    test "appends the block with Outline's append mode" do
+      assert Edit.append(@text, "## Seams\n\n- Few.") == {:ok, {:append, "## Seams\n\n- Few."}}
+
+      assert applied(@text, Edit.append(@text, "## Seams\n\n- Few.")) ==
+               @text <> "\n## Seams\n\n- Few.\n"
+    end
+
+    test "replaces a blank text" do
+      assert Edit.append("\n", "## Seams") == {:ok, {:replace, "## Seams\n"}}
     end
   end
 

@@ -85,6 +85,31 @@ defmodule Spickzettel.OutlineTest do
              Outline.patch_document("doc-1", {"Text", "Words"}, 1)
   end
 
+  test "appends a block with append mode, after a blank line so it stays a block of its own" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert params(conn) == %{
+               "id" => "doc-1",
+               "editMode" => "append",
+               "text" => "\n\n## New",
+               "lastRevision" => 1
+             }
+
+      Req.Test.json(conn, %{"data" => %{document(1) | "revision" => 2}})
+    end)
+
+    assert {:ok, %Document{revision: 2}} = Outline.patch_document("doc-1", {:append, "## New"}, 1)
+  end
+
+  test "replaces the whole text against the revision it was read at" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert params(conn) == %{"id" => "doc-1", "text" => "## New\n", "lastRevision" => 1}
+      Req.Test.json(conn, %{"data" => %{document(1) | "revision" => 2}})
+    end)
+
+    assert {:ok, %Document{revision: 2}} =
+             Outline.patch_document("doc-1", {:replace, "## New\n"}, 1)
+  end
+
   test "reports conflicts and rejected patches" do
     Req.Test.expect(Spickzettel.Outline, fn conn ->
       Req.Test.json(Plug.Conn.put_status(conn, 409), %{"error" => "document_conflict"})

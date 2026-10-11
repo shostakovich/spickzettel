@@ -1,7 +1,8 @@
 defmodule Spickzettel.Edit do
   @moduledoc """
-  Turns edits into patches for Outline's patch mode, which replaces the first occurrence of
-  `find` with `replace`.
+  Turns edits into patches for Outline: `{find, replace}` for its patch mode, which replaces the
+  first occurrence of `find`; `{:append, block}` for its append mode; `{:replace, text}` for the
+  whole text.
 
   Edits at a line anchor on the fewest lines up to it whose first occurrence is that position,
   so the patch touches as little of the document as possible.
@@ -9,12 +10,17 @@ defmodule Spickzettel.Edit do
 
   alias Spickzettel.Note
 
-  @type patch :: {find :: String.t(), replace :: String.t()}
+  @type patch ::
+          {find :: String.t(), replace :: String.t()}
+          | {:append, block :: String.t()}
+          | {:replace, text :: String.t()}
   @type result :: {:ok, patch()} | {:error, String.t()}
 
   @evidence ~r/^(\s*\*\*[^*]+:\*\*\s*)(\d+)\s+sessions?,\s+\S+\s+\d{4}-\d{2}-\d{2}\s*$/iu
 
   @spec apply(String.t(), patch()) :: String.t()
+  def apply(text, {:append, block}), do: String.trim_trailing(text) <> "\n\n" <> block <> "\n"
+  def apply(_text, {:replace, text}), do: text
   def apply(text, {find, replace}), do: String.replace(text, find, replace, global: false)
 
   @spec str_replace(String.t(), String.t(), String.t()) :: result()
@@ -43,13 +49,15 @@ defmodule Spickzettel.Edit do
       line < 0 or line > count -> {:error, "insert_line must be between 0 and #{count}."}
       inserted == "" -> {:error, "insert_text must not be empty."}
       line == 0 -> anchor_after(text, &{&1, inserted <> "\n" <> &1})
-      true -> anchor_before(text, line - 1, &{&1, &1 <> "\n" <> inserted})
+      true -> insert_after(text, line - 1, inserted)
     end
   end
 
   @doc "Appends a block at the end, separated by a blank line."
   @spec append(String.t(), String.t()) :: result()
-  def append(text, block), do: insert(text, Note.line_count(text), "\n" <> block)
+  def append(text, block) do
+    if blank?(text), do: {:ok, {:replace, block <> "\n"}}, else: {:ok, {:append, block}}
+  end
 
   @doc "Replaces the line at the 0-based `index`."
   @spec replace_line(String.t(), non_neg_integer(), String.t()) :: result()
@@ -62,8 +70,13 @@ defmodule Spickzettel.Edit do
   @doc "Inserts a block before the line at the 0-based `index`, separated by a blank line."
   @spec insert_before(String.t(), non_neg_integer(), String.t()) :: result()
   def insert_before(text, index, block) do
-    line = text |> String.split("\n") |> Enum.at(index)
-    replace_line(text, index, block <> "\n\n" <> line)
+    anchor_before(text, index, spanning(text, index), fn window ->
+      {window,
+       window
+       |> String.split("\n")
+       |> List.update_at(-1, &(block <> "\n\n" <> &1))
+       |> Enum.join("\n")}
+    end)
   end
 
   @doc "Removes the line at the 0-based `index`, which must not be the first line."
@@ -105,6 +118,19 @@ defmodule Spickzettel.Edit do
       if not blank?(window) and first_offset(text, window) == offset(lines, first),
         do: {:ok, patch.(window)}
     end)
+  end
+
+  defp insert_after(text, index, inserted) do
+    from = if String.contains?("\n" <> inserted, "\n\n"), do: spanning(text, index), else: index
+    anchor_before(text, index, from, &{&1, &1 <> "\n" <> inserted})
+  end
+
+  # Within one block Outline patches inline and silently drops added blocks; a window that reaches
+  # into the block before makes it re-parse both.
+  defp spanning(text, index) do
+    lines = text |> String.split("\n") |> Enum.take(index + 1)
+    gap = Enum.find(index..0//-1, &blank?(Enum.at(lines, &1)))
+    (gap && Enum.find(gap..0//-1, &(not blank?(Enum.at(lines, &1))))) || index
   end
 
   defp anchor_after(text, patch) do

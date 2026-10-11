@@ -52,16 +52,21 @@ defmodule Spickzettel.Outline do
     end
   end
 
-  @doc "Applies the patch with Outline's patch mode; fails with `:conflict` once `revision` is outdated."
+  @doc "Applies the patch with the matching edit mode; fails with `:conflict` once `revision` is outdated."
   @spec patch_document(String.t(), Edit.patch(), non_neg_integer()) ::
           {:ok, Document.t()} | {:error, error}
-  def patch_document(id, {find, replace}, revision) do
-    body = %{id: id, editMode: "patch", findText: find, text: replace, lastRevision: revision}
+  def patch_document(id, patch, revision) do
+    body = Map.merge(%{id: id, lastRevision: revision}, edit(patch))
 
     with {:ok, data} <- post("documents.update", body) do
       {:ok, to_document(data)}
     end
   end
+
+  # The leading newline keeps Outline from merging the block into a closing paragraph.
+  defp edit({:append, block}), do: %{editMode: "append", text: "\n\n" <> block}
+  defp edit({:replace, text}), do: %{text: text}
+  defp edit({find, replace}), do: %{editMode: "patch", findText: find, text: replace}
 
   @spec create_document(new_document()) :: {:ok, Document.t()} | {:error, error}
   def create_document(%{title: title, text: text, icon: icon, parent_id: parent_id}) do

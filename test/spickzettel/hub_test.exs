@@ -66,7 +66,9 @@ defmodule Spickzettel.HubTest do
                "Intro.\n\n## Notes\n\nSome text.\n\n* New\n"
     end
 
-    test "appends a missing section" do
+    test "appends a missing section with Outline's append mode" do
+      assert Hub.add_link(@hub, "Pitfalls", "* New") == {:ok, {:append, "## Pitfalls\n\n* New"}}
+
       assert applied(@hub, Hub.add_link(@hub, "Pitfalls", "* New")) ==
                @hub <> "\n## Pitfalls\n\n* New\n"
     end

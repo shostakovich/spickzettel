@@ -21,3 +21,75 @@ jobs:
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test --warnings-as-errors
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: spickzettel:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: |
+          token=$(openssl rand -hex 32)
+          docker run -d --name smoke -p 4000:4000 \
+            -e SPICKZETTEL_TOKEN="$token" \
+            -e SPICKZETTEL_GLOBAL_HUB=General \
+            -e SPICKZETTEL_DREAM_LOG=/memories/General/dream-log \
+            -e SPICKZETTEL_DREAM_LOG_ARCHIVE=/memories/General/dream-log-archive \
+            -e OUTLINE_URL=https://outline.invalid \
+            -e OUTLINE_API_TOKEN=smoke \
+            -e OUTLINE_COLLECTION_ID=smoke \
+            spickzettel:smoke
+          timeout 60 sh -c "until curl -fsS -o /dev/null -X POST http://localhost:4000/mcp/$token \
+            -H 'content-type: application/json' \
+            -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}'; do sleep 2; done"
+          curl -fsS -X POST "http://localhost:4000/mcp/$token" -H 'content-type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+            | grep -q '"instructions"'
+
+      - name: Show container logs
+        if: failure()
+        run: docker logs smoke
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: github.event_name == 'push'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Push image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

@@ -30,6 +30,22 @@ defmodule Spickzettel.NoteTest do
     assert Note.stand(@text) == "2026-10-09"
   end
 
+  test "reads typ and tells whether there is a header line" do
+    assert Note.typ(@text) == "feedback"
+    assert Note.header?(@text)
+    refute Note.header?("Text.\n")
+    refute Note.header?(nil)
+  end
+
+  test "sets stand in the header line" do
+    assert Note.put_stand("\n" <> @text, ~D[2026-10-11]) ==
+             {1, "`name: tests-london-style` · `typ: feedback` · `stand: 2026-10-11`"}
+
+    assert Note.put_stand(@text, ~D[2026-10-09]) == nil
+    assert Note.put_stand("`name: x`\n\nstand: 2026-01-01\n", ~D[2026-10-11]) == nil
+    assert Note.put_stand("Text, stand: 2026-01-01\n", ~D[2026-10-11]) == nil
+  end
+
   test "strips a closing sequence of #s only after whitespace" do
     text = "## C#\n\n## Mocks ##  \n\n### ###\n\n## Issue \\#\n"
 

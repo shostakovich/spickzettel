@@ -17,4 +17,9 @@ defmodule Spickzettel.MemoryPath do
 
   @spec hub(String.t()) :: String.t()
   def hub(name), do: "/memories/" <> name
+
+  @spec to_string(t()) :: String.t()
+  def to_string(:root), do: "/memories"
+  def to_string({:hub, name}), do: hub(name)
+  def to_string({:note, hub, slug}), do: hub(hub) <> "/" <> slug
 end

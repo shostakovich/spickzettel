@@ -4,7 +4,7 @@ defmodule Spickzettel.Instructions do
   @spec text(String.t()) :: String.t()
   def text(global_hub) do
     """
-    Long-term memory of the user's agents: Markdown notes, grouped in hubs, read with the `memory` tool.
+    Long-term memory of the user's agents: Markdown notes, grouped in hubs, read and edited with the `memory` tool.
 
     When to use it: check relevance first. For project work, and for questions about the user, their \
     preferences, devices, plans or past decisions, view /memories/#{global_hub} (rules for every project) \

@@ -9,6 +9,7 @@ defmodule Spickzettel.OutlineTest do
       "title" => "Doc #{n}",
       "icon" => nil,
       "parentDocumentId" => "hub",
+      "revision" => n,
       "text" => "Text #{n}"
     }
 
@@ -41,6 +42,7 @@ defmodule Spickzettel.OutlineTest do
              title: "Doc 100",
              icon: nil,
              parent_id: "hub",
+             revision: 100,
              text: "Text 100"
            }
   end
@@ -62,6 +64,40 @@ defmodule Spickzettel.OutlineTest do
     end)
 
     assert {:ok, %Document{id: "doc-1", text: "Text 1"}} = Outline.get_document("doc-1")
+  end
+
+  test "patches a document against the revision it was read at" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      assert conn.request_path == "/api/documents.update"
+
+      assert params(conn) == %{
+               "id" => "doc-1",
+               "editMode" => "patch",
+               "findText" => "Text",
+               "text" => "Words",
+               "lastRevision" => 1
+             }
+
+      Req.Test.json(conn, %{"data" => %{document(1) | "revision" => 2, "text" => "Words 1"}})
+    end)
+
+    assert {:ok, %Document{revision: 2, text: "Words 1"}} =
+             Outline.patch_document("doc-1", {"Text", "Words"}, 1)
+  end
+
+  test "reports conflicts and rejected patches" do
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      Req.Test.json(Plug.Conn.put_status(conn, 409), %{"error" => "document_conflict"})
+    end)
+
+    Req.Test.expect(Spickzettel.Outline, fn conn ->
+      Req.Test.json(Plug.Conn.put_status(conn, 400), %{"message" => "Text not found"})
+    end)
+
+    assert Outline.patch_document("doc-1", {"a", "b"}, 1) == {:error, :conflict}
+
+    assert Outline.patch_document("doc-1", {"a", "b"}, 1) ==
+             {:error, {:rejected, "Text not found"}}
   end
 
   test "reports missing documents and failed requests" do

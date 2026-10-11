@@ -1,16 +1,11 @@
 defmodule Spickzettel.EndpointTest do
   use ExUnit.Case, async: false
 
-  setup :set_req_test_to_shared
+  import Spickzettel.TestHelpers, only: [serve_fake_outline: 1]
 
-  setup do
-    Req.Test.stub(Spickzettel.Outline, &Spickzettel.FakeOutline.call/1)
-    server = start_supervised!({Bandit, plug: Spickzettel.Router, port: 0, ip: :loopback})
-    {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
-    %{base: "http://127.0.0.1:#{port}"}
-  end
+  alias Spickzettel.FakeOutline
 
-  defp set_req_test_to_shared(context), do: Req.Test.set_req_test_to_shared(context)
+  setup :serve_fake_outline
 
   defp post(base, path, message) do
     Req.post!(base <> path,
@@ -24,20 +19,30 @@ defmodule Spickzettel.EndpointTest do
     post(base, "/mcp/test-token", %{jsonrpc: "2.0", id: id, method: method, params: params})
   end
 
-  defp view(base, arguments) do
+  defp memory(base, command, arguments) do
     response =
       rpc(base, 3, "tools/call", %{
         name: "memory",
-        arguments: Map.put(arguments, :command, "view")
+        arguments: Map.put(arguments, :command, command)
       })
 
     assert %{
-             "result" => %{"isError" => false, "content" => [%{"type" => "text", "text" => text}]}
+             "result" => %{
+               "isError" => error?,
+               "content" => [%{"type" => "text", "text" => text}]
+             }
            } =
              response.body
 
+    if error?, do: {:error, text}, else: {:ok, text}
+  end
+
+  defp view(base, arguments) do
+    assert {:ok, text} = memory(base, "view", arguments)
     text
   end
+
+  defp today, do: NaiveDateTime.local_now() |> NaiveDateTime.to_date() |> Date.to_iso8601()
 
   test "completes the MCP handshake", %{base: base} do
     initialize =
@@ -91,5 +96,89 @@ defmodule Spickzettel.EndpointTest do
     response = post(base, "/mcp/wrong-token", %{jsonrpc: "2.0", id: 1, method: "tools/list"})
 
     assert response.status == 404
+  end
+
+  describe "concurrent edit in the browser" do
+    test "re-reads the newer revision and applies the replacement once more", %{base: base} do
+      FakeOutline.before_next_update(fn ->
+        FakeOutline.save_in_browser(
+          "note-tests",
+          &String.replace(&1, "Keep them few.", "Keep them very few.")
+        )
+      end)
+
+      assert memory(base, "str_replace", %{
+               path: "/memories/spickzettel/tests-london-style",
+               old_str: "Mock collaborators with Mox.",
+               new_str: "Mock collaborators with Mox, never the code under test."
+             }) == {:ok, "ok · /memories/spickzettel/tests-london-style · #{today()}"}
+
+      text = FakeOutline.text("note-tests")
+      assert text =~ "Mock collaborators with Mox, never the code under test."
+      assert text =~ "Keep them very few."
+      assert text =~ "`stand: #{today()}`"
+    end
+
+    test "changes nothing when the old text is gone in the newer revision", %{base: base} do
+      FakeOutline.before_next_update(fn ->
+        FakeOutline.save_in_browser(
+          "note-tests",
+          &String.replace(&1, "Mock collaborators with Mox.", "Use Mox.")
+        )
+      end)
+
+      assert {:error, "old_str was not found in the note" <> _} =
+               memory(base, "str_replace", %{
+                 path: "/memories/spickzettel/tests-london-style",
+                 old_str: "Mock collaborators with Mox.",
+                 new_str: "Mock everything."
+               })
+
+      text = FakeOutline.text("note-tests")
+      assert text =~ "Use Mox."
+      assert text =~ "`stand: 2026-10-09`"
+    end
+  end
+
+  describe "format check" do
+    test "rejects a write that would remove the Why line of a valid feedback note", %{base: base} do
+      before = FakeOutline.text("note-tests")
+
+      assert memory(base, "str_replace", %{
+               path: "/memories/spickzettel/tests-london-style",
+               old_str: "**Why:** Fast feedback.\n\n",
+               new_str: ""
+             }) ==
+               {:error,
+                "Rejected: the note would become invalid: no **Why:** line. Nothing changed."}
+
+      assert FakeOutline.text("note-tests") == before
+    end
+
+    test "applies an edit to a note without header line and warns", %{base: base} do
+      assert memory(base, "insert", %{
+               path: "/memories/spickzettel/release-checklist",
+               insert_line: 1,
+               insert_text: "\nRun the tests."
+             }) ==
+               {:ok,
+                "ok · /memories/spickzettel/release-checklist\nWarning: the note is invalid: no header line."}
+
+      assert FakeOutline.text("note-release") == "Steps before a release.\n\nRun the tests.\n"
+    end
+  end
+
+  test "confirm increments the evidence count and sets its date, nothing else", %{base: base} do
+    before = FakeOutline.text("note-tests")
+
+    assert memory(base, "confirm", %{path: "/memories/spickzettel/tests-london-style"}) ==
+             {:ok, "ok · /memories/spickzettel/tests-london-style · 2026-10-09"}
+
+    assert FakeOutline.text("note-tests") ==
+             String.replace(
+               before,
+               "**Belege:** 2 Sessions, zuletzt 2026-10-01",
+               "**Belege:** 3 sessions, last #{today()}"
+             )
   end
 end

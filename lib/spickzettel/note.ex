@@ -5,7 +5,9 @@ defmodule Spickzettel.Note do
 
   @header ~r/^`?name:/
   @name ~r/^`?name:\s*([^\s`·]+)/u
+  @typ ~r/\btyp:\s*([a-z]+)/
   @stand ~r/\bstand:\s*(\d{4}-\d{2}-\d{2})/
+  @stand_value ~r/(\bstand:\s*)\d{4}-\d{2}-\d{2}/
   @label ~r/^\*\*[^*]+:\*\*\s*/u
   @heading ~r/^(\#{1,6})\s+(.+)$/u
   @fence ~r/^\s*(```|~~~)/
@@ -16,8 +18,33 @@ defmodule Spickzettel.Note do
   @spec name(String.t() | nil) :: String.t() | nil
   def name(text), do: header_value(text, @name)
 
+  @spec typ(String.t() | nil) :: String.t() | nil
+  def typ(text), do: header_value(text, @typ)
+
   @spec stand(String.t() | nil) :: String.t() | nil
   def stand(text), do: header_value(text, @stand)
+
+  @doc "Sets `stand` in the header line; the 0-based index and the new line, or nil if unchanged."
+  @spec put_stand(String.t(), Date.t()) :: {non_neg_integer(), String.t()} | nil
+  def put_stand(text, date) do
+    with {line, index} <-
+           text |> String.split("\n") |> Enum.with_index() |> Enum.find(&present?/1),
+         true <- header_line?(String.trim(line)),
+         stamped = Regex.replace(@stand_value, line, "\\g{1}#{date}", global: false),
+         false <- stamped == line do
+      {index, stamped}
+    else
+      _ -> nil
+    end
+  end
+
+  @spec header?(String.t() | nil) :: boolean()
+  def header?(text) do
+    case non_empty_lines(text) do
+      [first | _] -> header_line?(first)
+      [] -> false
+    end
+  end
 
   @spec summary(String.t() | nil) :: String.t() | nil
   def summary(text) do
@@ -25,8 +52,8 @@ defmodule Spickzettel.Note do
 
     line =
       case paragraphs do
-        [first, second] -> if header?(first), do: second, else: first
-        [first] -> unless header?(first), do: first
+        [first, second] -> if header_line?(first), do: second, else: first
+        [first] -> unless header_line?(first), do: first
         [] -> nil
       end
 
@@ -77,7 +104,7 @@ defmodule Spickzettel.Note do
 
   defp header_value(text, regex) do
     with [first | _] <- non_empty_lines(text),
-         true <- header?(first),
+         true <- header_line?(first),
          [_, value] <- Regex.run(regex, first) do
       value
     else
@@ -85,7 +112,9 @@ defmodule Spickzettel.Note do
     end
   end
 
-  defp header?(line), do: Regex.match?(@header, line)
+  defp header_line?(line), do: Regex.match?(@header, line)
+
+  defp present?({line, _index}), do: String.trim(line) != ""
 
   defp heading_lines(text) do
     text

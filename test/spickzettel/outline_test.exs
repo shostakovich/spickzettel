@@ -85,12 +85,12 @@ defmodule Spickzettel.OutlineTest do
              Outline.patch_document("doc-1", {"Text", "Words"}, 1)
   end
 
-  test "appends a block with append mode, after a blank line so it stays a block of its own" do
+  test "appends a block with append mode, after one newline so it neither merges nor leaves an empty paragraph" do
     Req.Test.expect(Spickzettel.Outline, fn conn ->
       assert params(conn) == %{
                "id" => "doc-1",
                "editMode" => "append",
-               "text" => "\n\n## New",
+               "text" => "\n## New",
                "lastRevision" => 1
              }
 

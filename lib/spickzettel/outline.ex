@@ -63,8 +63,8 @@ defmodule Spickzettel.Outline do
     end
   end
 
-  # The leading newline keeps Outline from merging the block into a closing paragraph.
-  defp edit({:append, block}), do: %{editMode: "append", text: "\n\n" <> block}
+  # One newline keeps Outline from merging into a closing paragraph; two leave an empty one.
+  defp edit({:append, block}), do: %{editMode: "append", text: "\n" <> block}
   defp edit({:replace, text}), do: %{text: text}
   defp edit({find, replace}), do: %{editMode: "patch", findText: find, text: replace}
 

@@ -2,7 +2,7 @@ defmodule Spickzettel.SessionStart do
   @moduledoc """
   The text the SessionStart hook puts into a local session: the cross-project hub and the
   project's hub, rendered like `view` without the notes' summaries. Over the hook's context limit,
-  the project hub's oldest entries go first, then the cross-project hub's.
+  the longer hub loses its oldest entry until the text fits, so neither hub is emptied first.
   """
 
   alias Spickzettel.{Lookup, MemoryPath, Reply, View}
@@ -56,31 +56,26 @@ defmodule Spickzettel.SessionStart do
   defp missing(project),
     do: "No hub #{MemoryPath.hub(project)}, so only the cross-project hub is loaded."
 
-  defp fit(sections, notice) do
-    full = Enum.map(sections, &length(&1.entries))
+  defp fit(sections, notice), do: fit(sections, Enum.map(sections, &length(&1.entries)), notice)
 
-    kept =
-      sections
-      |> Enum.with_index()
-      |> Enum.reverse()
-      |> Enum.reduce_while(full, fn {section, index}, kept ->
-        if fits?(sections, kept, notice),
-          do: {:halt, kept},
-          else: {:cont, shorten(sections, kept, index, length(section.entries), notice)}
-      end)
+  defp fit(sections, kept, notice) do
+    text = render(sections, kept, notice)
 
-    render(sections, kept, notice)
+    with false <- utf16_length(text) < @limit,
+         {_length, index} <- longest(sections, kept) do
+      fit(sections, List.update_at(kept, index, &(&1 - 1)), notice)
+    else
+      _fits_or_empty -> text
+    end
   end
 
-  defp shorten(sections, kept, index, count, notice) do
-    keep =
-      Enum.find(count..0//-1, 0, &fits?(sections, List.replace_at(kept, index, &1), notice))
-
-    List.replace_at(kept, index, keep)
+  defp longest(sections, kept) do
+    Enum.zip(sections, kept)
+    |> Enum.with_index()
+    |> Enum.filter(fn {{_section, keep}, _index} -> keep > 0 end)
+    |> Enum.map(fn {{section, keep}, index} -> {utf16_length(block(section, keep)), index} end)
+    |> Enum.max(&>=/2, fn -> nil end)
   end
-
-  defp fits?(sections, kept, notice),
-    do: utf16_length(render(sections, kept, notice)) < @limit
 
   # Hook clients count the limit in UTF-16 code units, in which an emoji takes two or more.
   defp utf16_length(text),

@@ -10,6 +10,7 @@ defmodule Spickzettel.SessionStartTest do
   @deps [index: IndexMock, outline: OutlineMock, global_hub: "General"]
   @global %Document{id: "hub-general", title: "General", icon: "📒", text: nil}
   @project %Document{id: "hub-project", title: "spickzettel", text: nil}
+  @long String.duplicate("x", 200)
 
   defp note(n, stand, padding \\ "") do
     %Document{
@@ -17,6 +18,13 @@ defmodule Spickzettel.SessionStartTest do
       title: String.trim("Note #{n} #{padding}"),
       text: "`name: note-#{n}` · `typ: project` · `stand: #{stand}`\n\n**Kurz:** Short."
     }
+  end
+
+  defp shown(text, hub) do
+    text
+    |> String.split("\n\n")
+    |> Enum.find(&String.contains?(&1, "· /memories/#{hub}\n"))
+    |> then(&length(Regex.scan(~r/^- Note \d+ /m, &1)))
   end
 
   defp utf16_length(text),
@@ -69,9 +77,8 @@ defmodule Spickzettel.SessionStartTest do
               """}
   end
 
-  test "shortens the project hub's list over budget, oldest notes first" do
-    long = String.duplicate("x", 200)
-    project_notes = for n <- 1..60, do: note(n, Date.add(~D[2026-01-01], n), long)
+  test "shortens the longer hub over budget, oldest notes first" do
+    project_notes = for n <- 1..60, do: note(n, Date.add(~D[2026-01-01], n), @long)
     hubs([note(0, "2026-10-01")], project_notes)
 
     assert {:ok, text} = SessionStart.text("spickzettel", @deps)
@@ -81,19 +88,38 @@ defmodule Spickzettel.SessionStartTest do
     assert text =~ "· note-60 ·"
     refute text =~ "· note-1 ·"
 
-    shown = length(Regex.scan(~r/^- Note \d+ /m, text)) - 1
+    shown = shown(text, "spickzettel")
     assert text =~ ~r/\n- … #{60 - shown} more notes: memory view \/memories\/spickzettel\n$/
   end
 
-  test "shortens the cross-project hub too when it alone is over budget" do
-    long = String.duplicate("x", 200)
-    hubs(for(n <- 1..60, do: note(n, "2026-10-01", long)), [note(61, "2026-10-01")])
+  test "keeps a small project hub complete while the big cross-project hub is shortened" do
+    global_notes = for n <- 1..60, do: note(n, Date.add(~D[2026-01-01], n), @long)
+    hubs(global_notes, for(n <- 61..63, do: note(n, "2026-10-01")))
 
     assert {:ok, text} = SessionStart.text("spickzettel", @deps)
 
     assert utf16_length(text) < 10_000
-    assert text =~ ~r/\n- … \d+ more notes: memory view \/memories\/General\n/
-    assert text =~ "\n- … 1 more note: memory view /memories/spickzettel\n"
+    assert shown(text, "spickzettel") == 3
+    refute text =~ "memory view /memories/spickzettel"
+    assert text =~ "· note-60 ·"
+    refute text =~ "· note-1 ·"
+
+    shown = shown(text, "General")
+    assert text =~ "\n- … #{60 - shown} more notes: memory view /memories/General\n\n"
+  end
+
+  test "shortens both hubs alike when both are big" do
+    hubs(
+      for(n <- 1..60, do: note(n, "2026-10-01", @long)),
+      for(n <- 61..120, do: note(n, "2026-10-01", @long))
+    )
+
+    assert {:ok, text} = SessionStart.text("spickzettel", @deps)
+
+    assert utf16_length(text) < 10_000
+    assert text =~ "more notes: memory view /memories/General\n"
+    assert text =~ "more notes: memory view /memories/spickzettel\n"
+    assert abs(shown(text, "General") - shown(text, "spickzettel")) <= 1
   end
 
   test "counts the budget in UTF-16 code units, in which an emoji takes two" do

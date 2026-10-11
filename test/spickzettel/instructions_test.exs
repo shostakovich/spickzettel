@@ -12,5 +12,6 @@ defmodule Spickzettel.InstructionsTest do
     assert text =~ "/memories/General"
     assert text =~ "/memories/<hub>/<slug>"
     assert text =~ "`stand: YYYY-MM-DD`"
+    assert text =~ "at most 160 characters"
   end
 end

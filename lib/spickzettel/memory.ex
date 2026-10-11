@@ -18,8 +18,9 @@ defmodule Spickzettel.Memory do
         "Read and edit the user's long-term memory. `view` a path: /memories lists the hubs, " <>
           "/memories/<hub> lists a hub's notes, /memories/<hub>/<slug> shows a note. " <>
           "Narrow a note with `section` (a heading) or `view_range` (lines of the note below its title). " <>
-          "`create` makes the note at `path` from `title`, `typ`, `file_text` (the summary line and " <>
-          "content; the server adds the header line) and an optional emoji `icon`, and links it in its " <>
+          "`create` makes the note at `path` from `title`, `typ`, `file_text` (the summary line of " <>
+          "at most 160 characters and content; the server adds the header line) and an optional " <>
+          "emoji `icon`, and links it in its " <>
           "hub under the section for its typ, or under `section`, which `user` notes, pitfalls and the " <>
           "cross-project hub require; " <>
           "it reports similar notes. `create` at /memories/<hub> makes a project hub described by " <>

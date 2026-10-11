@@ -1,13 +1,14 @@
 defmodule Spickzettel.NoteFormat do
   @moduledoc """
-  The note format: header line `name · typ · stand`, then the summary line; feedback and project
-  notes also carry Why and How to apply.
+  The note format: header line `name · typ · stand`, then the summary line of at most 160
+  characters; feedback and project notes also carry Why and How to apply.
   """
 
   alias Spickzettel.Note
 
   @typs ~w(user feedback project reference)
   @reasoned ~w(feedback project)
+  @summary_limit 160
 
   @spec typs() :: [String.t()]
   def typs, do: @typs
@@ -33,7 +34,18 @@ defmodule Spickzettel.NoteFormat do
   end
 
   defp summary_problems(text) do
-    if Note.summary(text), do: [], else: ["no summary line"]
+    line = Note.summary_line(text)
+
+    cond do
+      line == nil ->
+        ["no summary line"]
+
+      String.length(line) > @summary_limit ->
+        ["summary line has #{String.length(line)} characters, above #{@summary_limit}"]
+
+      true ->
+        []
+    end
   end
 
   defp reason_problems(text) do

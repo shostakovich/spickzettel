@@ -53,18 +53,21 @@ defmodule Spickzettel.Note do
     end
   end
 
+  @doc "The summary without its `**Label:**`."
   @spec summary(String.t() | nil) :: String.t() | nil
   def summary(text) do
-    paragraphs = text |> non_empty_lines() |> Enum.take(2)
-
-    line =
-      case paragraphs do
-        [first, second] -> if header_line?(first), do: second, else: first
-        [first] -> unless header_line?(first), do: first
-        [] -> nil
-      end
-
+    line = summary_line(text)
     line && String.replace(line, @label, "")
+  end
+
+  @doc "The first line after the header line, trimmed."
+  @spec summary_line(String.t() | nil) :: String.t() | nil
+  def summary_line(text) do
+    case text |> non_empty_lines() |> Enum.take(2) do
+      [first, second] -> if header_line?(first), do: second, else: first
+      [first] -> unless header_line?(first), do: first
+      [] -> nil
+    end
   end
 
   @spec headings(String.t() | nil) :: [String.t()]

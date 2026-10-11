@@ -273,6 +273,14 @@ defmodule Spickzettel.MemoryTest do
                 "Rejected: the note would become invalid: no **Why:** line. Nothing changed."}
     end
 
+    test "rejects an edit that makes the summary line too long" do
+      expect(OutlineMock, :get_document, fn "note-1" -> {:ok, @valid} end)
+
+      assert write("str_replace", %{"old_str" => "Fast.", "new_str" => String.duplicate("x", 160)}) ==
+               {:error,
+                "Rejected: the note would become invalid: summary line has 170 characters, above 160. Nothing changed."}
+    end
+
     test "warns about long notes" do
       long = %{@valid | text: @valid.text <> String.duplicate("x", 15_000)}
       expect(OutlineMock, :get_document, fn "note-1" -> {:ok, long} end)

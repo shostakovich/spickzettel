@@ -52,4 +52,15 @@ defmodule Spickzettel.RouterTest do
     assert call(:post, "/mcp/wrong", "{}").status == 404
     assert call(:get, "/").status == 404
   end
+
+  test "needs a project for the session start hubs" do
+    conn = call(:get, "/mcp/test-token/hubs")
+
+    assert conn.status == 400
+    assert conn.resp_body == "Missing project."
+  end
+
+  test "hides the session start hubs behind the token" do
+    assert call(:get, "/mcp/wrong/hubs?project=spickzettel").status == 404
+  end
 end

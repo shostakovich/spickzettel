@@ -246,6 +246,25 @@ defmodule Spickzettel.EndpointTest do
     end
   end
 
+  test "serves the session start hubs uncached", %{base: base} do
+    response =
+      Req.get!(base <> "/mcp/test-token/hubs", params: [project: "spickzettel"], retry: false)
+
+    assert response.status == 200
+    assert response.body =~ "# 📝 spickzettel · /memories/spickzettel\n"
+    assert Req.Response.get_header(response, "cache-control") == ["no-store"]
+  end
+
+  test "answers the session start hubs with 502 when Outline fails", %{base: base} do
+    Req.Test.stub(Spickzettel.Outline, &Plug.Conn.send_resp(&1, 503, ""))
+
+    response =
+      Req.get!(base <> "/mcp/test-token/hubs", params: [project: "spickzettel"], retry: false)
+
+    assert response.status == 502
+    assert response.body == "Outline answered with status 503."
+  end
+
   test "rename across hubs moves the link from the old hub to the new one", %{base: base} do
     assert memory(base, "rename", %{
              old_path: "/memories/spickzettel/tests-london-style",

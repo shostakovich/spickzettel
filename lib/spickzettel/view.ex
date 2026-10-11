@@ -9,7 +9,11 @@ defmodule Spickzettel.View do
   end
 
   @spec hub(Document.t(), [Document.t()]) :: String.t()
-  def hub(hub, notes) do
+  def hub(hub, notes), do: lines(hub_lines(hub, notes))
+
+  @doc "The hub's heading, then one line per note, newest `stand` first."
+  @spec hub_lines(Document.t(), [Document.t()]) :: [String.t()]
+  def hub_lines(hub, notes) do
     entries =
       notes
       |> Enum.map(&{&1, Note.stand(&1.text)})
@@ -17,7 +21,7 @@ defmodule Spickzettel.View do
       |> Enum.sort_by(fn {_note, stand} -> stand end, :desc)
       |> Enum.map(fn {note, stand} -> entry(note, stand) end)
 
-    lines(["# #{labelled(hub)} · #{MemoryPath.hub(hub.title)}" | entries])
+    ["# #{labelled(hub)} · #{MemoryPath.hub(hub.title)}" | entries]
   end
 
   @spec note(Document.t()) :: String.t()

@@ -30,6 +30,14 @@ defmodule Spickzettel.ViewTest do
            """
   end
 
+  test "gives a hub's heading and entries as lines" do
+    hub = note("project", nil, "")
+    notes = [note("Tests", nil, "`name: tests` · `stand: 2026-10-09`\n\n**Kurz:** Fast.")]
+
+    assert View.hub_lines(hub, notes) ==
+             ["# project · /memories/project", "- Tests · tests · 2026-10-09 — Fast."]
+  end
+
   test "shows a hub without notes as its heading" do
     assert View.hub(note("empty", nil, ""), []) == "# empty · /memories/empty"
   end

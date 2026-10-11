@@ -133,6 +133,10 @@ defmodule Spickzettel.FakeOutline do
     Agent.start_link(fn -> %{documents: @documents, before_update: nil} end, name: __MODULE__)
   end
 
+  @doc "Adds documents to the collection."
+  def add(documents),
+    do: Agent.update(__MODULE__, fn state -> update_in(state.documents, &(&1 ++ documents)) end)
+
   @doc "Returns a document's current text."
   def text(id), do: document(id)["text"]
 

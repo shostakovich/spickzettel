@@ -12,6 +12,15 @@ defmodule Spickzettel.Lookup do
     end
   end
 
+  @doc "The hub's index entry and its notes."
+  @spec hub(MemoryPath.t(), map()) :: {:ok, Document.t(), [Document.t()]} | {:error, String.t()}
+  def hub(path, deps) do
+    with {:ok, hub} <- entry(path, deps),
+         {:ok, notes} <- Reply.outline(deps.outline.list_documents(hub.id)) do
+      {:ok, hub, notes}
+    end
+  end
+
   @doc "The document with its text."
   @spec document(MemoryPath.t(), map()) :: {:ok, Document.t()} | {:error, String.t()}
   def document(path, deps) do

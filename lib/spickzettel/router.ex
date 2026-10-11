@@ -1,9 +1,12 @@
 defmodule Spickzettel.Router do
-  @moduledoc "Streamable HTTP transport for MCP at `/mcp/<token>`, answering with plain JSON."
+  @moduledoc """
+  Streamable HTTP transport for MCP at `/mcp/<token>`, answering with plain JSON, and the hubs
+  for the SessionStart hook at `/mcp/<token>/hubs?project=<name>`.
+  """
 
   use Plug.Router
 
-  alias Spickzettel.MCP
+  alias Spickzettel.{MCP, SessionStart}
 
   @max_body_bytes 1_000_000
 
@@ -22,6 +25,22 @@ defmodule Spickzettel.Router do
       :unauthorized -> send_resp(conn, 404, "")
       {:more, _partial, conn} -> send_resp(conn, 413, "")
       {:error, _reason} -> send_resp(conn, 400, "")
+    end
+  end
+
+  get "/mcp/:token/hubs" do
+    with :ok <- authorize(token),
+         %{"project" => project} when is_binary(project) and project != "" <-
+           fetch_query_params(conn).query_params do
+      conn = put_resp_header(conn, "cache-control", "no-store")
+
+      case SessionStart.text(project) do
+        {:ok, text} -> send_text(conn, 200, text)
+        {:error, message} -> send_text(conn, 502, message)
+      end
+    else
+      :unauthorized -> send_resp(conn, 404, "")
+      _params -> send_text(conn, 400, "Missing project.")
     end
   end
 
@@ -50,6 +69,12 @@ defmodule Spickzettel.Router do
       [] -> send_resp(conn, 202, "")
       responses -> send_json(conn, 200, responses)
     end
+  end
+
+  defp send_text(conn, status, text) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(status, text)
   end
 
   defp send_json(conn, status, body) do

@@ -234,10 +234,7 @@ defmodule Spickzettel.Memory do
   end
 
   defp view({:hub, _name} = path, :all, deps) do
-    with {:ok, hub} <- Lookup.entry(path, deps),
-         {:ok, notes} <- Reply.outline(deps.outline.list_documents(hub.id)) do
-      {:ok, View.hub(hub, notes)}
-    end
+    with {:ok, hub, notes} <- Lookup.hub(path, deps), do: {:ok, View.hub(hub, notes)}
   end
 
   defp view({:note, _hub, _slug} = path, scope, deps) do

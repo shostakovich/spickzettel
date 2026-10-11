@@ -41,7 +41,7 @@ defmodule Spickzettel.Lifecycle do
          similar = similar(new.title, text, deps),
          {:ok, note} <-
            Reply.outline(deps.outline.create_document(new_document(new, text, hub))) do
-      warnings = link(hub, section, note, text, deps) ++ Write.length_warnings(text)
+      warnings = warnings(link(hub, section, note, text, deps)) ++ Write.length_warnings(text)
       deps.index.refresh()
       {:ok, Reply.written(MemoryPath.to_string(path), note, warnings ++ similar)}
     end
@@ -56,7 +56,7 @@ defmodule Spickzettel.Lifecycle do
          {:ok, section} <- section(global, nil, new.section, deps),
          new_hub = %{title: name, text: text, icon: new.icon, parent_id: nil},
          {:ok, hub} <- Reply.outline(deps.outline.create_document(new_hub)) do
-      warnings = link(global, section, hub, text, deps)
+      warnings = warnings(link(global, section, hub, text, deps))
       deps.index.refresh()
       {:ok, Reply.written(MemoryPath.to_string(path), hub, warnings)}
     end
@@ -227,8 +227,15 @@ defmodule Spickzettel.Lifecycle do
 
   defp relink(_from_hub, nil, _note, _deps), do: []
 
-  defp relink(from_hub, {hub, section}, note, deps),
-    do: link(hub, section, note, note.text, deps) ++ unlink(from_hub, note, deps)
+  defp relink(from_hub, {hub, section}, note, deps) do
+    case link(hub, section, note, note.text, deps) do
+      {:ok, warnings} ->
+        warnings ++ unlink(from_hub, note, deps)
+
+      {:error, warning} ->
+        [warning <> " The link in #{MemoryPath.hub(from_hub)} stays."]
+    end
+  end
 
   defp link(hub, section, document, text, deps) do
     line = Hub.link(document, Note.summary(text))
@@ -236,15 +243,18 @@ defmodule Spickzettel.Lifecycle do
     case Reply.outline(Write.run(hub.id, &Hub.add_link(&1, section, line), deps, @hub_edit)) do
       {:ok, _hub, _warnings} ->
         if section in Hub.sections(hub.text),
-          do: [],
-          else: [
-            "Warning: added new section #{inspect(section)} to #{MemoryPath.hub(hub.title)}."
-          ]
+          do: {:ok, []},
+          else:
+            {:ok,
+             ["Warning: added new section #{inspect(section)} to #{MemoryPath.hub(hub.title)}."]}
 
       {:error, message} ->
-        ["Warning: no link added to #{MemoryPath.hub(hub.title)}: #{message}"]
+        {:error, "Warning: no link added to #{MemoryPath.hub(hub.title)}: #{message}"}
     end
   end
+
+  defp warnings({:ok, warnings}), do: warnings
+  defp warnings({:error, warning}), do: [warning]
 
   defp unlink(hub_name, note, deps) do
     with {:ok, hub} <- Lookup.entry({:hub, hub_name}, deps),

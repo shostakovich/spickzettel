@@ -18,6 +18,9 @@ defmodule Spickzettel.DreamLogTest do
 
   defp run(date, size), do: "## #{date} · Dream\n\n" <> String.duplicate("x", size) <> "\n"
 
+  defp patched(document, patch),
+    do: %{document | text: Edit.apply(document.text, patch), revision: document.revision + 1}
+
   defp log(sizes) do
     runs = for {size, day} <- Enum.with_index(sizes), do: run("2026-10-#{20 - day}", size)
     Enum.join(["Log of all runs, newest first.\n" | runs], "\n")
@@ -77,12 +80,12 @@ defmodule Spickzettel.DreamLogTest do
     test "moves the oldest sections from the dream log into the archive", context do
       expect(OutlineMock, :patch_document, fn "archive", patch, 2 ->
         assert Edit.apply(context.archive.text, patch) =~ "Older runs.\n\n## 2026-10-18"
-        {:ok, context.archive}
+        {:ok, patched(context.archive, patch)}
       end)
 
       expect(OutlineMock, :patch_document, fn "log", patch, 5 ->
         assert Edit.apply(context.dream_log.text, patch) == log([8_000, 4_000])
-        {:ok, context.dream_log}
+        {:ok, patched(context.dream_log, patch)}
       end)
 
       assert DreamLog.archive(@deps.dream_log, context.dream_log, @deps) == [
@@ -91,7 +94,10 @@ defmodule Spickzettel.DreamLogTest do
     end
 
     test "warns when the sections could not leave the dream log", context do
-      expect(OutlineMock, :patch_document, fn "archive", _patch, 2 -> {:ok, context.archive} end)
+      expect(OutlineMock, :patch_document, fn "archive", patch, 2 ->
+        {:ok, patched(context.archive, patch)}
+      end)
+
       expect(OutlineMock, :patch_document, fn "log", _patch, 5 -> {:error, {:status, 500}} end)
 
       assert DreamLog.archive(@deps.dream_log, context.dream_log, @deps) == [

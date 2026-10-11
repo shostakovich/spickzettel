@@ -34,10 +34,11 @@ defmodule Spickzettel.Write do
 
   defp patch(id, document, edit, deps, options, attempts) do
     with {:ok, patch} <- edit.(document.text),
-         {:ok, warnings} <- check(document.text, Edit.apply(document.text, patch), options) do
+         edited = Edit.apply(document.text, patch),
+         {:ok, warnings} <- check(document.text, edited, options) do
       case deps.outline.patch_document(id, patch, document.revision) do
         {:ok, written} ->
-          {:ok, written, warnings}
+          with :ok <- applied(written, edited), do: {:ok, written, warnings}
 
         {:error, :conflict} when attempts > 1 ->
           patch(id, edit, deps, options, attempts - 1)
@@ -62,6 +63,23 @@ defmodule Spickzettel.Write do
 
       _unchanged ->
         rejected
+    end
+  end
+
+  # Outline may answer success yet store something else, e.g. when it drops blocks it cannot patch.
+  defp applied(written, edited) do
+    if comparable(written.text) == comparable(edited),
+      do: :ok,
+      else:
+        {:error,
+         "Outline accepted the edit but stored a different text; the edit may be missing or " <>
+           "incomplete, so view the document and check it."}
+  end
+
+  # Outline re-serializes the text, escaping punctuation and normalizing bullets and blank lines.
+  defp comparable(text) do
+    for line <- String.split(text, "\n"), line = String.trim(line), line != "" do
+      line |> String.replace(~r/\\([[:punct:]])/u, "\\1") |> String.replace(~r/^[-+] /, "* ")
     end
   end
 
@@ -116,6 +134,9 @@ defmodule Spickzettel.Write do
     with {index, line} <- Note.put_stand(document.text, deps.today.()),
          {:ok, patch} <- Edit.replace_line(document.text, index, line) do
       case deps.outline.patch_document(document.id, patch, document.revision) do
+        {:ok, written} ->
+          with :ok <- applied(written, Edit.apply(document.text, patch)), do: {:ok, written}
+
         {:error, :conflict} when attempts > 1 ->
           with {:ok, current} <- deps.outline.get_document(document.id),
                do: stamp(current, deps, attempts - 1)

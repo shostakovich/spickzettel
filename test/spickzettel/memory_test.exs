@@ -285,8 +285,12 @@ defmodule Spickzettel.MemoryTest do
       long = %{@valid | text: @valid.text <> String.duplicate("x", 15_000)}
       expect(OutlineMock, :get_document, fn "note-1" -> {:ok, long} end)
 
-      expect(OutlineMock, :patch_document, 2, fn "note-1", patch, revision ->
-        {:ok, patched(long, patch, revision + 1)}
+      expect(OutlineMock, :patch_document, fn "note-1", patch, 12 ->
+        {:ok, patched(long, patch, 13)}
+      end)
+
+      expect(OutlineMock, :patch_document, fn "note-1", stamp, 13 ->
+        {:ok, patched(patched(long, {"Fast.", "Quick."}, 13), stamp, 14)}
       end)
 
       expect(IndexMock, :refresh, fn -> :ok end)
@@ -386,6 +390,43 @@ defmodule Spickzettel.MemoryTest do
 
       assert write("str_replace", %{"old_str" => "Speed.", "new_str" => "Pace."}) ==
                {:ok, "ok · /memories/project/tests · 2026-10-11"}
+    end
+
+    test "reports an edit Outline accepted but did not store, without claiming success" do
+      expect(OutlineMock, :get_document, fn "note-1" -> {:ok, @valid} end)
+
+      expect(OutlineMock, :patch_document, fn "note-1", {"Speed.", _replace}, 12 ->
+        {:ok, %{@valid | revision: 13}}
+      end)
+
+      assert write("str_replace", %{
+               "old_str" => "Speed.",
+               "new_str" => "Speed.\n\n## Mocks\n\nMox."
+             }) ==
+               {:error,
+                "Outline accepted the edit but stored a different text; the edit may be " <>
+                  "missing or incomplete, so view the document and check it."}
+    end
+
+    test "accepts how Outline re-serializes the edited text" do
+      expect(OutlineMock, :get_document, fn "note-1" -> {:ok, @valid} end)
+
+      expect(OutlineMock, :patch_document, fn "note-1", {"Mox.", _replace}, 12 ->
+        text = String.replace(@valid.text, "Mox.\n", "Mox.\n\n* Stubs \\* rarely.\n")
+        {:ok, %{@valid | text: text, revision: 13}}
+      end)
+
+      expect(OutlineMock, :patch_document, fn "note-1", stamp, 13 ->
+        text = String.replace(@valid.text, "Mox.\n", "Mox.\n\n* Stubs \\* rarely.\n")
+        {:ok, patched(%{@valid | text: text}, stamp, 14)}
+      end)
+
+      expect(IndexMock, :refresh, fn -> :ok end)
+
+      assert write("str_replace", %{
+               "old_str" => "Mox.",
+               "new_str" => "Mox.\n\n\n- Stubs * rarely.  "
+             }) == {:ok, "ok · /memories/project/tests · 2026-10-11"}
     end
 
     test "reports patches Outline rejects" do

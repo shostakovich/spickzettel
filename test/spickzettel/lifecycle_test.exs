@@ -169,6 +169,22 @@ defmodule Spickzettel.LifecycleTest do
                   "Warning: no link added to /memories/project: Outline answered with status 500."}
     end
 
+    test "warns instead of claiming a new section when Outline drops the appended section" do
+      expect(OutlineMock, :create_document, fn new -> {:ok, %{@note | text: new.text}} end)
+
+      expect(OutlineMock, :patch_document, fn "hub-1", {:append, _block}, 4 ->
+        {:ok, %{@project | revision: 5}}
+      end)
+
+      expect(IndexMock, :refresh, fn -> :ok end)
+
+      assert {:ok,
+              "ok · /memories/project/mocks · 2026-10-11\n" <>
+                "Warning: no link added to /memories/project: Outline accepted the edit but " <>
+                "stored a different text" <> _} =
+               Lifecycle.create({:note, "project", "mocks"}, %{@new | typ: "project"}, @deps)
+    end
+
     test "in the cross-project hub, links under the named section only" do
       expect(OutlineMock, :create_document, fn %{parent_id: "hub-0"} = new ->
         {:ok, %{@note | text: new.text}}
@@ -319,6 +335,19 @@ defmodule Spickzettel.LifecycleTest do
                {:ok,
                 "ok · /memories/other/stubs · 2026-10-11\n" <>
                   ~s(Warning: added new section "Working style" to /memories/other.)}
+    end
+
+    test "across hubs: keeps the old link when the new one fails" do
+      expect_note_writes()
+      expect(OutlineMock, :move_document, fn "note-1", "hub-2" -> :ok end)
+      expect(OutlineMock, :patch_document, fn "hub-2", _patch, 2 -> {:error, {:status, 500}} end)
+      expect(IndexMock, :refresh, fn -> :ok end)
+
+      assert Lifecycle.rename({:note, "project", "mocks"}, {:note, "other", "stubs"}, nil, @deps) ==
+               {:ok,
+                "ok · /memories/other/stubs · 2026-10-11\n" <>
+                  "Warning: no link added to /memories/other: Outline answered with status 500. " <>
+                  "The link in /memories/project stays."}
     end
 
     test "within a hub only renames, without touching links" do

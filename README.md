@@ -9,7 +9,7 @@ MCP server that gives coding agents a long-term memory stored in an Outline coll
 ## Endpoints
 
 - `POST /mcp/<token>`: MCP over Streamable HTTP, plain JSON responses.
-- `GET /mcp/<token>/hubs?project=<name>`: hub text for the SessionStart hook, below 10,000 characters.
+- `GET /mcp/<token>/hubs?project=<name>`: hub text for the SessionStart hook, below 10,000 characters; it lists each note's icon, title, slug and stand without the summary.
 - A wrong token answers 404.
 
 ## Container image

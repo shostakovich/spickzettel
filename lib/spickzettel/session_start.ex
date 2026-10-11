@@ -1,8 +1,8 @@
 defmodule Spickzettel.SessionStart do
   @moduledoc """
   The text the SessionStart hook puts into a local session: the cross-project hub and the
-  project's hub, rendered like `view`. Over the hook's context limit, the project hub's oldest
-  entries go first, then the cross-project hub's.
+  project's hub, rendered like `view` without the notes' summaries. Over the hook's context limit,
+  the project hub's oldest entries go first, then the cross-project hub's.
   """
 
   alias Spickzettel.{Lookup, MemoryPath, Reply, View}
@@ -49,7 +49,7 @@ defmodule Spickzettel.SessionStart do
   end
 
   defp section(hub, notes) do
-    [heading | entries] = View.hub_lines(hub, notes)
+    [heading | entries] = View.hub_lines(hub, notes, summary: false)
     %{path: MemoryPath.hub(hub.title), heading: heading, entries: entries}
   end
 

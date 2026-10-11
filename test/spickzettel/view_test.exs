@@ -38,6 +38,14 @@ defmodule Spickzettel.ViewTest do
              ["# project · /memories/project", "- Tests · tests · 2026-10-09 — Fast."]
   end
 
+  test "leaves out the summaries on request" do
+    hub = note("project", nil, "")
+    notes = [note("Tests", "🧪", "`name: tests` · `stand: 2026-10-09`\n\n**Kurz:** Fast.")]
+
+    assert View.hub_lines(hub, notes, summary: false) ==
+             ["# project · /memories/project", "- 🧪 Tests · tests · 2026-10-09"]
+  end
+
   test "shows a hub without notes as its heading" do
     assert View.hub(note("empty", nil, ""), []) == "# empty · /memories/empty"
   end

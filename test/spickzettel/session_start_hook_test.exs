@@ -65,7 +65,7 @@ defmodule Spickzettel.SessionStartHookTest do
         %{
           "id" => "note-#{n}",
           "urlId" => "N#{n}",
-          "title" => "Note #{n}",
+          "title" => "Note #{n} " <> String.duplicate("with a long title ", 3),
           "icon" => nil,
           "parentDocumentId" => "hub-project",
           "revision" => 1,

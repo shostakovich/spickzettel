@@ -11,11 +11,11 @@ defmodule Spickzettel.SessionStartTest do
   @global %Document{id: "hub-general", title: "General", icon: "📒", text: nil}
   @project %Document{id: "hub-project", title: "spickzettel", text: nil}
 
-  defp note(n, stand, summary \\ "Short.") do
+  defp note(n, stand, padding \\ "") do
     %Document{
       id: "note-#{n}",
-      title: "Note #{n}",
-      text: "`name: note-#{n}` · `typ: project` · `stand: #{stand}`\n\n**Kurz:** #{summary}"
+      title: String.trim("Note #{n} #{padding}"),
+      text: "`name: note-#{n}` · `typ: project` · `stand: #{stand}`\n\n**Kurz:** Short."
     }
   end
 
@@ -34,7 +34,7 @@ defmodule Spickzettel.SessionStartTest do
     end)
   end
 
-  test "renders the cross-project hub, then the project hub" do
+  test "renders the cross-project hub, then the project hub, without summaries" do
     hubs([note(1, "2026-10-01")], [note(2, "2026-10-02")])
 
     assert SessionStart.text("spickzettel", @deps) ==
@@ -43,10 +43,10 @@ defmodule Spickzettel.SessionStartTest do
               Memory hubs, loaded at session start; view their notes with the memory tool.
 
               # 📒 General · /memories/General
-              - Note 1 · note-1 · 2026-10-01 — Short.
+              - Note 1 · note-1 · 2026-10-01
 
               # spickzettel · /memories/spickzettel
-              - Note 2 · note-2 · 2026-10-02 — Short.
+              - Note 2 · note-2 · 2026-10-02
               """}
   end
 
@@ -78,10 +78,10 @@ defmodule Spickzettel.SessionStartTest do
 
     assert utf16_length(text) < 10_000
     assert text =~ "- Note 0 · note-0"
-    assert text =~ "- Note 60 · note-60"
-    refute text =~ "- Note 1 · note-1 "
+    assert text =~ "· note-60 ·"
+    refute text =~ "· note-1 ·"
 
-    shown = length(Regex.scan(~r/^- Note \d+ · /m, text)) - 1
+    shown = length(Regex.scan(~r/^- Note \d+ /m, text)) - 1
     assert text =~ ~r/\n- … #{60 - shown} more notes: memory view \/memories\/spickzettel\n$/
   end
 
@@ -97,7 +97,7 @@ defmodule Spickzettel.SessionStartTest do
   end
 
   test "counts the budget in UTF-16 code units, in which an emoji takes two" do
-    emoji = String.duplicate("🧪", 100)
+    emoji = String.duplicate("🧪", 120)
     hubs([note(0, "2026-10-01")], for(n <- 1..60, do: note(n, "2026-10-01", emoji)))
 
     assert {:ok, text} = SessionStart.text("spickzettel", @deps)

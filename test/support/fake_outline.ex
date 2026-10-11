@@ -237,10 +237,16 @@ defmodule Spickzettel.FakeOutline do
   end
 
   defp edit(conn, id, text, %{"editMode" => "patch", "findText" => find, "text" => replacement}) do
-    if String.contains?(text, find),
-      do: saved(conn, id, &String.replace(&1, find, replacement, global: false)),
-      else:
+    cond do
+      not String.contains?(text, find) ->
         error(conn, 400, "validation_error", "The specified text was not found in the document")
+
+      within_list?(find) and String.contains?(replacement, "\n\n") ->
+        saved(conn, id, & &1)
+
+      true ->
+        saved(conn, id, &String.replace(&1, find, replacement, global: false))
+    end
   end
 
   defp edit(conn, id, _text, %{"editMode" => "append", "text" => appended}),
@@ -249,6 +255,10 @@ defmodule Spickzettel.FakeOutline do
   defp edit(conn, id, _text, %{"text" => replacement} = params)
        when not is_map_key(params, "editMode"),
        do: saved(conn, id, fn _text -> replacement end)
+
+  # Like Outline, which patches a match within one list in place and drops the blocks it adds.
+  defp within_list?(find),
+    do: find |> String.split("\n", trim: true) |> Enum.all?(&Regex.match?(~r/^\s*[*-] /, &1))
 
   defp saved(conn, id, fun) do
     save_in_browser(id, fun)

@@ -285,6 +285,39 @@ defmodule Spickzettel.EndpointTest do
              memory(base, "view", %{path: "/memories/other/london-tests"})
   end
 
+  test "rename appends a new section to a hub that ends in a list", %{base: base} do
+    FakeOutline.save_in_browser(
+      "hub-other",
+      &(&1 <> "\n## Releases\n\n* [Release](http://outline.test/doc/REL9)\n")
+    )
+
+    assert {:ok, _reply} =
+             memory(base, "rename", %{
+               old_path: "/memories/spickzettel/tests-london-style",
+               new_path: "/memories/other/london-tests"
+             })
+
+    assert FakeOutline.text("hub-other") =~
+             "(http://outline.test/doc/REL9)\n\n## Working style\n\n* 🧪 [Tests: London style]"
+
+    refute FakeOutline.text("hub-project") =~ "TST1"
+  end
+
+  test "reports an insert Outline accepted but did not store", %{base: base} do
+    FakeOutline.save_in_browser("hub-other", fn _text -> "* One\n* Two\n" end)
+
+    assert memory(base, "insert", %{
+             path: "/memories/other",
+             insert_line: 1,
+             insert_text: "\n## More\n\nText."
+           }) ==
+             {:error,
+              "Outline accepted the edit but stored a different text; the edit may be " <>
+                "missing or incomplete, so view the document and check it."}
+
+    assert FakeOutline.text("hub-other") == "* One\n* Two\n"
+  end
+
   test "delete removes the note and its link", %{base: base} do
     assert memory(base, "delete", %{path: "/memories/spickzettel/tests-london-style"}) ==
              {:ok, "ok · deleted /memories/spickzettel/tests-london-style"}

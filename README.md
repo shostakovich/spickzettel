@@ -14,7 +14,8 @@ MCP server that gives coding agents a long-term memory stored in an Outline coll
 
 ## Container image
 
-- Build: `docker build -t spickzettel .`
+- Published: `ghcr.io/shostakovich/spickzettel:latest` and `:sha-<commit>`, built by CI on every push to `main` (linux/amd64)
+- Build locally: `docker build -t spickzettel .`
 - Run: `docker run --env-file spickzettel.env -p 4000:4000 spickzettel`
 - Runs as `nobody`, listens on `PORT`, Erlang distribution is off.
 - Serve it behind a TLS-terminating reverse proxy; for a claude.ai connector, admit only Anthropic's published egress IP ranges from the internet (ADR 0003).

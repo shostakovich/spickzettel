@@ -32,13 +32,13 @@ defmodule Spickzettel.NoteFormatTest do
              ["no summary line"]
   end
 
-  test "limits the summary line, label included, to 160 characters" do
+  test "limits the summary text, label excluded, to 160 characters" do
     header = "`name: x` · `typ: user` · `stand: 2026-10-09`\n\n**Kurz:** "
 
-    assert NoteFormat.problems(header <> String.duplicate("x", 150) <> "\n") == []
+    assert NoteFormat.problems(header <> String.duplicate("x", 160) <> "\n") == []
 
-    assert NoteFormat.problems(header <> String.duplicate("x", 151) <> "\n") ==
-             ["summary line has 161 characters, above 160"]
+    assert NoteFormat.problems(header <> String.duplicate("x", 161) <> "\n") ==
+             ["summary has 161 characters, above 160"]
   end
 
   test "requires Why and How to apply in feedback and project notes" do

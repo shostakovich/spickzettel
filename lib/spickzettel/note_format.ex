@@ -1,6 +1,6 @@
 defmodule Spickzettel.NoteFormat do
   @moduledoc """
-  The note format: header line `name · typ · stand`, then the summary line of at most 160
+  The note format: header line `name · typ · stand`, then the summary line, its text at most 160
   characters; feedback and project notes also carry Why and How to apply.
   """
 
@@ -34,14 +34,14 @@ defmodule Spickzettel.NoteFormat do
   end
 
   defp summary_problems(text) do
-    line = Note.summary_line(text)
+    summary = Note.summary(text)
 
     cond do
-      line == nil ->
+      summary == nil ->
         ["no summary line"]
 
-      String.length(line) > @summary_limit ->
-        ["summary line has #{String.length(line)} characters, above #{@summary_limit}"]
+      String.length(summary) > @summary_limit ->
+        ["summary has #{String.length(summary)} characters, above #{@summary_limit}"]
 
       true ->
         []
